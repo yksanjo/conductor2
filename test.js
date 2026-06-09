@@ -117,11 +117,13 @@ console.log('\nswarm files');
   ok(!!(stat.mode & 0o100), 'swarm-say helper is executable');
   ok(p.sayPath.startsWith(p.dir), 'swarm-say is per-swarm (lives in the swarm dir), not a shared global');
   const sayBody = fs.readFileSync(p.sayPath, 'utf8');
-  ok(sayBody.includes('conductor2:'), 'swarm-say targets the conductor2 tmux session');
   // dogfood finding #4: the allowlist must be baked in — every member is a case arm, outsiders rejected.
   ok(p.members.every((w) => sayBody.includes(`    ${w}) ;;`)), 'swarm-say bakes in every member window as an allowed target');
-  ok(/not a member of this swarm — refusing/.test(sayBody), 'swarm-say refuses any window outside the swarm');
+  ok(/is not a member of swarm .* refusing/.test(sayBody), 'swarm-say refuses any window outside the swarm');
   ok(!sayBody.includes('dogfood-s1') && !sayBody.includes('other-swarm'), 'swarm-say has no cross-swarm targets');
+  // finding #5: delivery routes through the node helper (readiness-gated), not raw send-keys.
+  ok(/exec node .*swarm-say\.js/.test(sayBody), 'swarm-say execs the readiness-gated node helper');
+  ok(fs.existsSync(path.join(__dirname, 'swarm-say.js')), 'the swarm-say.js helper exists in the package');
 }
 
 // --- model override (dogfood finding #10: no --model escape hatch) ---------------------------
@@ -171,6 +173,15 @@ console.log('\nregressions (dogfood findings)');
   ok(!/trust this folder/i.test(manage.tailLines(transcriptDiscussingTrust)), 'BUG-2: trust phrase up in scrollback is excluded by tailLines');
   const actualTrustPrompt = 'some output\n'.repeat(30) + 'Do you trust this folder?\n❯ 1. Yes, I trust';
   ok(/trust this folder/i.test(manage.tailLines(actualTrustPrompt)), 'BUG-2: a real trust prompt at the bottom is still caught');
+
+  // BUG-3: a turn in progress ("esc to interrupt") is 'running', NOT 'ready', so paneStage and
+  // confirmDelivery no longer disagree. classifyPane is the pure core paneStage runs on the tail.
+  const C = manage.classifyPane;
+  ok(C('❯ \n  ⏵⏵ accept edits on (shift+tab to cycle) · esc to interrupt') === 'running', "BUG-3: empty caret + 'esc to interrupt' = running, not ready");
+  ok(C('❯ \n  ⏵⏵ accept edits on (shift+tab to cycle)') === 'ready', 'idle prompt (no interrupt marker) = ready');
+  ok(C('Do you trust this folder?\n❯ 1. Yes, I trust') === 'trust', 'trust prompt classified');
+  ok(C('Resume from summary\nResume full session as-is') === 'resume', 'resume picker classified');
+  ok(C('? for shortcuts') === 'ready' && C('loading a huge transcript…') === 'busy', 'ready footer vs unknown=busy');
 }
 
 // --- fire + registry (integration, needs tmux) -------------------------------------------------
@@ -211,6 +222,7 @@ srv.listen(0, '127.0.0.1', async () => {
 
   const board = await get('/board');
   ok(board.status === 200 && board.text.includes('Board') && board.text.includes('Launch pad'), 'GET /board serves the cockpit board');
+  ok(board.text.includes('isStalled') && board.text.includes('⚠ stalled?') && board.text.includes('data-nudge'), 'board ships the stalled-handoff detector + nudge (finding #5)');
 
   const cfg = await get('/api/config');
   const cj = JSON.parse(cfg.text);

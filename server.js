@@ -16,6 +16,8 @@
 
 const http = require('http');
 const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const { execFile } = require('child_process');
 const { collectSessions } = require('./lib');
 const manage = require('./manage');
@@ -138,6 +140,9 @@ const CSS = /* css */ `
   .cfoot { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
   .chip { font-family:var(--mono); font-size:10.5px; color:var(--mut); background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:6px; padding:2px 7px; }
   .chip.swarm { color:var(--accent); border-color:rgba(169,116,255,.4); }
+  .chip.stall { color:var(--recent); border-color:rgba(245,177,63,.5); background:rgba(245,177,63,.1); }
+  .qb.nudge { color:var(--recent); border-color:rgba(245,177,63,.5); padding:2px 8px; font-size:10.5px; }
+  .qb.nudge:hover { background:rgba(245,177,63,.18); border-color:var(--recent); }
   .mbadge { font-size:9px; font-weight:750; letter-spacing:.7px; text-transform:uppercase; color:var(--accent); background:rgba(169,116,255,.12); border:1px solid rgba(169,116,255,.3); border-radius:999px; padding:2px 7px; }
   .bopen { font:inherit; font-size:10.5px; font-weight:650; color:var(--open); background:rgba(70,216,198,.1); border:1px solid rgba(70,216,198,.32); border-radius:7px; padding:2px 8px; cursor:pointer; transition:.12s; }
   .bopen:hover { background:rgba(70,216,198,.22); }
@@ -484,6 +489,16 @@ function recordBcast(results){
   (results||[]).forEach(r => { if (r && r.label) BCAST[r.label] = { status:r.status, stage:r.stage, at:now }; });
 }
 
+// Stalled-handoff detector: a swarm agent that's gone quiet (not actively working) while the swarm
+// hasn't produced its final REPORT.md probably missed a handoff — swarm-say is best-effort. Flag it
+// so a missed message doesn't silently freeze the pipeline; the nudge re-sends a "proceed" prompt.
+const STALL_MS = 4*60*1000;
+function isStalled(s){
+  return s.swarm && s.managed && !s.swarmDone && s.status !== 'active'
+    && (Date.now() - (s.lastActiveTs || s.lastActivityTs || 0)) > STALL_MS;
+}
+const NUDGE = 'You appear idle. Check the swarm out/ directory and re-read your briefing: if you are waiting on a handoff message that never arrived, proceed now with the information already on disk; if your work is done, hand off or write your output file.';
+
 const esc = (s)=> (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function statusMeta(k){ return (META.statuses||[]).find(s=>s.key===k) || { key:k, title:k, word:k, color:'#6a6a85' }; }
 function statusLabel(k){ return statusMeta(k).word; }
@@ -500,7 +515,7 @@ async function load() {
     const j = await r.json();
     DATA = j.sessions;
     if (j.statuses) META = { statuses:j.statuses };
-    const structure = WINDOW + '|' + JSON.stringify(DATA.map(s=>[s.sessionId,s.status,s.managed,s.swarm]));
+    const structure = WINDOW + '|' + JSON.stringify(DATA.map(s=>[s.sessionId,s.status,s.managed,s.swarm,isStalled(s)]));
     if (structure !== lastHash && !typingNow()) { lastHash = structure; render(); }
     else updateInPlace();
   } catch(e) { /* keep last render */ }
@@ -545,7 +560,7 @@ function cardHTML(s) {
       </div>
       <div class="label">\${esc(s.title || s.label)}</div>
       <div class="task">\${esc(s.lastAction || s.intent || '—')}</div>
-      <div class="cfoot">\${s.managed ? bcastChip(s.mlabel) : ''}\${s.role ? '<span class="chip swarm" title="swarm role">'+esc(s.role.split('—')[0].trim())+'</span>' : ''}\${s.place ? '<span class="chip">'+esc(s.place)+'</span>' : ''}\${s.gitBranch ? '<span class="chip">'+esc(s.gitBranch)+'</span>' : ''}\${s.managed ? '<button class="bopen" data-open="'+esc(s.mlabel)+'" title="Open this window in Terminal">↗ open</button>' : ''}</div>
+      <div class="cfoot">\${s.managed ? bcastChip(s.mlabel) : ''}\${isStalled(s) ? '<span class="chip stall" title="Idle for a while with no REPORT.md yet — may have missed a handoff">⚠ stalled?</span><button class="qb nudge" data-nudge="'+esc(s.mlabel)+'" title="Re-send a proceed prompt">nudge</button>' : ''}\${s.role ? '<span class="chip swarm" title="swarm role">'+esc(s.role.split('—')[0].trim())+'</span>' : ''}\${s.place ? '<span class="chip">'+esc(s.place)+'</span>' : ''}\${s.gitBranch ? '<span class="chip">'+esc(s.gitBranch)+'</span>' : ''}\${s.managed ? '<button class="bopen" data-open="'+esc(s.mlabel)+'" title="Open this window in Terminal">↗ open</button>' : ''}</div>
       \${ctrlHTML(s)}
     </div>\`;
 }
@@ -666,6 +681,8 @@ function dispatchReply(el, text) {
   else if (el.dataset.session != null) replyAdopt(el.dataset.session, text);
 }
 boardEl.addEventListener('click', e=>{
+  const nb = e.target.closest('.nudge');
+  if (nb) { e.stopPropagation(); reply(nb.dataset.nudge, NUDGE); return; }
   const ob = e.target.closest('.bopen');
   if (ob) { e.stopPropagation(); openTerm(ob.dataset.open); return; }
   const cb = e.target.closest('.xclose');
@@ -799,9 +816,15 @@ async function handle(req, res) {
     try {
       const rows = await collectSessions({ minutes, all });
       const mgd = manage.managedBySession();
+      const reportCache = {};   // swarm -> does out/REPORT.md exist (one statSync per swarm, not per row)
       for (const r of rows) {
         const w = mgd[r.sessionId];
-        if (w) { r.managed = true; r.mlabel = w.label; r.swarm = w.swarm || null; r.role = w.role || null; }
+        if (!w) continue;
+        r.managed = true; r.mlabel = w.label; r.swarm = w.swarm || null; r.role = w.role || null;
+        if (w.swarm) {
+          if (!(w.swarm in reportCache)) reportCache[w.swarm] = fs.existsSync(path.join(swarm.SWARMS_DIR, w.swarm, 'out', 'REPORT.md'));
+          r.swarmDone = reportCache[w.swarm];   // final deliverable landed → swarm is finished, not stalled
+        }
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ generatedAt: new Date().toISOString(), statuses: statusMeta(), count: rows.length, sessions: rows }));

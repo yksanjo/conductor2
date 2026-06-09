@@ -142,18 +142,27 @@ function answerTrust(label) { return key(label, 'Enter'); }
 //            are exactly these large sessions — the old trust-only handler never answered this
 //            menu, so adopting hung here and the reply was typed into it.
 //   busy   = booting, loading history, or compacting — not safe to type into yet
-//   ready  = Claude's prompt box is up and will accept a reply
+//   running= a turn is in progress ("esc to interrupt"). The input box may look empty (Claude lets
+//            you QUEUE a line), but the contract for "ready" is "will accept a reply now", and
+//            confirmDelivery reads the same "esc to interrupt" marker as "a turn is running" — so
+//            classifying a running turn as ready made the two disagree (BUG-3). Treated as not-ready.
+//   ready  = Claude's prompt box is up and idle; a reply starts a fresh turn
 //   gone   = the window/pane no longer exists
-function paneStage(label) {
-  const r = tmux(['capture-pane', '-p', '-t', target(label)]);
-  if (r.code !== 0) return 'gone';
-  const s = tailLines(r.out);   // BUG-2: match chrome in the bottom rows, not transcript content
+// Pure classifier (testable without a live pane): given the bottom rows of a captured pane,
+// return its stage. paneStage() is the live wrapper that captures + tails + calls this.
+function classifyPane(s) {
   if (/trust this folder|Yes, I trust|safety check/i.test(s)) return 'trust';
   if (/Resume from summary|Resume full session as-is/i.test(s)) return 'resume';
   if (/Compacting conversation/i.test(s)) return 'busy';
-  if (/\? for shortcuts|shift\+tab to cycle|auto mode on|esc to interrupt/i.test(s)
-      || /^\s*[│|]?\s*[❯>]\s*$/m.test(s)) return 'ready';   // footer hints, or an empty prompt caret
+  if (/esc to interrupt/i.test(s)) return 'running';        // a turn is in progress — not ready (BUG-3)
+  if (/\? for shortcuts|shift\+tab to cycle|auto mode on/i.test(s)
+      || /^\s*[│|]?\s*[❯>]\s*$/m.test(s)) return 'ready';   // idle footer hints, or an empty prompt caret
   return 'busy';                                            // unknown / still loading
+}
+function paneStage(label) {
+  const r = tmux(['capture-pane', '-p', '-t', target(label)]);
+  if (r.code !== 0) return 'gone';
+  return classifyPane(tailLines(r.out));   // BUG-2: classify the bottom rows, not transcript content
 }
 
 // Answer the resume picker by selecting "Resume full session as-is" (one Down from the
@@ -372,4 +381,4 @@ function managedBySession() {
   return map;
 }
 
-module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, deliverAdopted, sanitize, windowAlive, tailLines, resolveSession, hasTmux, SESSION, REG_FILE };
+module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, deliverAdopted, sanitize, windowAlive, tailLines, classifyPane, resolveSession, hasTmux, SESSION, REG_FILE };

@@ -67,13 +67,18 @@ of truth; messages are best-effort nudges, with the board as the backstop** when
 - **Files.** Each swarm gets `~/.conductor2/swarms/<name>/` with `mission.md`, per-agent role
   briefings in `prompts/`, artifacts in `out/`, scratch in `notes/`. Files are the source of truth;
   the final deliverable is always `out/REPORT.md`.
-- **Messages.** `~/.conductor2/bin/swarm-say <window> "<one line>"` — tmux `send-keys` into a
-  sibling window's prompt. Briefings teach every agent the protocol: task dispatches, DONE
-  reports, pipeline handoffs are all one-line pointers to files.
+- **Messages.** Each swarm gets its **own** `swarm-say <window> "<one line>"` in its directory. Two
+  guarantees the raw `tmux send-keys` version lacked: (1) the target must be a live member of *this*
+  swarm — its members are baked into the script as an allowlist, so an agent can't cross-talk into
+  another swarm or your personal session; (2) delivery routes through the readiness gate, so a handoff
+  is **refused, not silently swallowed**, if the target pane is at a prompt or mid-turn. Briefings
+  teach the protocol: task dispatches, DONE reports, and pipeline handoffs are one-line pointers to files.
 
 Launch order is dependency-aware (receivers before initiators), each window is walked through
 Claude's startup prompts automatically, and the kickoff is a single line pointing at the agent's
-briefing file — long prompts never travel through tmux.
+briefing file — long prompts never travel through tmux. If a message is ever missed, the board's
+**stalled-handoff detector** flags the idle agent with a one-click re-nudge — best-effort messages,
+with supervision as the backstop.
 
 ## Design stance (the honest seams, stated plainly)
 
@@ -100,12 +105,28 @@ Locked to `claude-fable-5` by default — that's the point of V2, maximum power 
 bikeshedding. It's a default, not a cage: override per-swarm with `conductor2 fire --model <id>` or
 globally with `CONDUCTOR2_MODEL=<id>`, so the tool doesn't rot when a stronger model ships.
 
-### What's deliberately *not* claimed yet
+## Measured coordination reliability
 
-The pitch is coordination reliability, so the honest gap is that it isn't **quantified** yet — no
-N-run completion rates per preset, no single-agent baseline, no cost/latency table. That eval harness
-is the next build, not a shipped claim. One real data point so far: the 3-stage dogfood run below
-completed end to end with both handoffs (s1→s2→s3) landing unattended.
+The pitch is coordination reliability, so it ships with an eval that **measures** it instead of
+asserting it. `npm run eval` fires a deterministic relay swarm — each agent appends one baton line
+and hands off, the last writes `REPORT.md` — N times and reports completion rate, handoff success,
+and wall-clock vs a single-agent baseline. The relay isolates the handoff machinery (swarm-say +
+shared directory) from model quality, so it runs on a cheap model; the coordination code path is
+identical on any model. Real run ([evals/RESULTS.md](evals/RESULTS.md), `pipeline · 3 agents · haiku`):
+
+| metric | value |
+|---|---|
+| **completion rate** (REPORT.md within 200s) | **67%** (2/3 runs) |
+| handoff success (baton lines landed / expected) | 67% (6/9) |
+| median wall-clock, completed runs | 61s |
+| single-agent baseline, same deliverable | **13s** |
+
+**Read it honestly:** for a *linear* 3-stage chain, one agent is ~5× faster and 100% reliable —
+multi-agent coordination has real overhead and a real tail-failure rate (one run stalled when a
+handoff didn't land). So the harness doubles as a decision tool: **use a swarm for parallelizable
+breadth** (4 researchers hitting 4 angles at once), **not for a sequence one agent can do faster** —
+and when a handoff is dropped, the board's stalled-detector is the backstop. That tradeoff being
+visible and quantified is the point; `npm run eval --runs 10` re-measures it for your own setup.
 
 ## Dogfooded on itself — and it found real bugs
 
@@ -114,16 +135,20 @@ pipeline --agents 3` launched three Fable 5 agents that read all ~2,600 lines, r
 critiqued the repo through a hiring manager's lens, and merged a ranked report — coordinating
 entirely over `swarm-say` and the shared `out/` directory ([docs/dogfood-report.md](docs/dogfood-report.md)).
 
-It didn't rubber-stamp itself. Stage 1 found **six real bugs with file:line**, including one it
+It didn't rubber-stamp itself. The swarm found **six real bugs with file:line**, including one it
 **verified live against its own registry** (BUG-1: agents launched into one folder all bound to the
-same transcript, breaking the cockpit's swarm grouping — the headline feature). All six are now
-fixed in [commit `77b3641`](https://github.com/yksanjo/conductor2/commit/77b3641) with regression
-tests. The tool finding, and surviving, its own review is the demo.
+same transcript, breaking the cockpit's swarm grouping — the headline feature), plus a ranked
+top-10 ([docs/dogfood-report.md](docs/dogfood-report.md)). Every actionable finding was then fixed:
+all six bugs with regression tests; the safety model upgraded from prose to a **mechanical
+per-swarm allowlist**; the **stalled-handoff detector**; and the **eval harness** above that
+answers its #1 critique ("no quantified reliability") with real numbers. The tool finding — and
+then surviving, and being improved by — its own review is the demo.
 
 ## Surfaces
 
 - `conductor2 up` — launch pad (`/`) + cockpit board (`/board`) on `:7592`
 - `conductor2 fire|plan|presets|swarms|stop` — the same fire control from the terminal
+- `npm run eval` — measure coordination reliability (see above)
 - All state-changing endpoints are POST-only, localhost-only, CSRF-guarded (V1's scheme)
 
 ## Testing

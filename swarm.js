@@ -87,22 +87,24 @@ function plan(config = {}) {
   };
 }
 
-// The per-swarm messaging helper every briefing references. One line in, tmux send-keys out.
-// The swarm's member windows are baked in as an allowlist: a target outside the swarm is refused
-// before any keystroke is sent, so an agent can't cross-talk into another swarm or a user's own
-// session even if its prompt tells it to (dogfood finding #4 — mechanical boundary, not prose).
-function sayScript(members) {
+// The per-swarm messaging helper every briefing references: `swarm-say <window> "<msg>"`.
+// It's a thin shell wrapper that (1) fast-rejects any window outside this swarm's baked-in member
+// allowlist, then (2) hands off to swarm-say.js, which re-checks membership against the live
+// registry AND delivers through manage.deliver()'s readiness gate — so a handoff is refused (not
+// silently swallowed) if the target pane is at a prompt or mid-turn (dogfood findings #4 + #5).
+const SAY_HELPER = path.join(__dirname, 'swarm-say.js');
+function sayScript(swarm, members) {
   const cases = members.map((w) => `    ${w}) ;;`).join('\n');
   return `#!/bin/sh
-# swarm-say <window> <message...> — deliver a one-line message to a fellow agent in THIS swarm.
-# Members of this swarm (the only valid targets): ${members.join(', ')}
+# swarm-say <window> <message...> — message a fellow agent in swarm "${swarm}".
+# Members (the only valid targets): ${members.join(', ')}
 [ -n "$1" ] && [ -n "$2" ] || { echo "usage: swarm-say <window> <message>" >&2; exit 1; }
 W="$1"; shift
 case "$W" in
 ${cases}
-    *) echo "swarm-say: \\"$W\\" is not a member of this swarm — refusing. Members: ${members.join(', ')}" >&2; exit 2 ;;
+    *) echo "swarm-say: \\"$W\\" is not a member of swarm ${swarm} — refusing. Members: ${members.join(', ')}" >&2; exit 2 ;;
 esac
-tmux send-keys -t "conductor2:$W" -l -- "$*" && sleep 0.3 && tmux send-keys -t "conductor2:$W" Enter
+exec node ${JSON.stringify(SAY_HELPER)} ${JSON.stringify(swarm)} "$W" "$*"
 `;
 }
 
@@ -111,7 +113,7 @@ function writeSwarmFiles(p) {
   fs.mkdirSync(path.join(p.dir, 'prompts'), { recursive: true });
   fs.mkdirSync(path.join(p.dir, 'out'), { recursive: true });
   fs.mkdirSync(path.join(p.dir, 'notes'), { recursive: true });
-  fs.writeFileSync(p.sayPath, sayScript(p.members), { mode: 0o755 });
+  fs.writeFileSync(p.sayPath, sayScript(p.swarm, p.members), { mode: 0o755 });
   fs.writeFileSync(path.join(p.dir, 'mission.md'),
     `# Swarm: ${p.swarm}\n\n- topology: ${p.topology}\n- model: ${p.model}\n- cwd: ${p.cwd}\n- permission mode: ${p.permissionMode}\n- fired: ${new Date().toISOString()}\n\n## Purpose\n${p.purpose}\n\n## Crew\n${p.agents.map((a) => `- ${a.window} — ${a.role}`).join('\n')}\n`);
   for (const a of p.agents) fs.writeFileSync(a.briefingPath, a.briefing);

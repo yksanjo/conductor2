@@ -12,12 +12,14 @@
   "scripts": {
     "start": "node cli.js up",
     "serve": "node server.js",
+    "eval": "node evals/coordination.mjs",
     "test": "node test.js"
   },
   "files": [
     "cli.js",
     "server.js",
     "swarm.js",
+    "swarm-say.js",
     "topologies.js",
     "presets.js",
     "manage.js",
