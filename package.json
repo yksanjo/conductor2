@@ -1,0 +1,50 @@
+{
+  "name": "@yksanjo/conductor2",
+  "version": "2.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Conductor V2 — configure the swarm before you fire it. Pick a topology (hierarchical / pipeline / mesh), load a preset (deep research / market bots / web3+security), set the purpose, FIRE: a fleet of Claude Code windows on Fable 5, coordinating over tmux, watched from one cockpit.",
+  "bin": {
+    "conductor2": "cli.js"
+  },
+  "main": "swarm.js",
+  "scripts": {
+    "start": "node cli.js up",
+    "serve": "node server.js",
+    "test": "node test.js"
+  },
+  "files": [
+    "cli.js",
+    "server.js",
+    "swarm.js",
+    "topologies.js",
+    "presets.js",
+    "manage.js",
+    "engine.js",
+    "lib.js",
+    "util.js",
+    "adapters/claude-code.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "swarm",
+    "multi-agent",
+    "orchestrator",
+    "tmux",
+    "cockpit"
+  ],
+  "author": "yksanjo",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yksanjo/conductor2.git"
+  },
+  "dependencies": {}
+}
