@@ -118,6 +118,46 @@ console.log('\nswarm files');
   ok(fs.readFileSync(p.sayPath, 'utf8').includes('conductor2:'), 'swarm-say targets the conductor2 tmux session');
 }
 
+// --- regression: the bugs the dogfood swarm found (unit-level, no tmux) ----------------------
+console.log('\nregressions (dogfood findings)');
+{
+  // BUG-1: N windows sharing one cwd must resolve to N DISTINCT sessionIds, not collapse onto the
+  // newest transcript. Build a fake registry + transcripts and drive listManaged().
+  const cwd = path.join(SANDBOX, 'work'); fs.mkdirSync(cwd, { recursive: true });
+  const projDir = path.join(SANDBOX, '.claude', 'projects', cwd.replace(/\//g, '-'));
+  fs.mkdirSync(projDir, { recursive: true });
+  const base = Date.now() - 5000;
+  // three transcripts, staggered mtimes, all newer than the windows' launch
+  [['aaa', 0], ['bbb', 1000], ['ccc', 2000]].forEach(([id, dt]) => {
+    const f = path.join(projDir, id + '.jsonl');
+    fs.writeFileSync(f, '{}\n');
+    fs.utimesSync(f, new Date(base + dt) / 1000, new Date(base + dt) / 1000);
+  });
+  // three managed windows in that cwd, no sessionId yet, launch order aaa<bbb<ccc
+  const reg = { windows: {} };
+  ['w-s1', 'w-s2', 'w-s3'].forEach((label, i) => {
+    reg.windows[label] = { label, target: 'conductor2:' + label, cwd, created: base - 200 + i * 10, sessionId: null, swarm: 'w' };
+  });
+  // Drive resolveSession exactly as listManaged does: resolve windows in launch order, adding each
+  // bound id to the claimed set. The fix must hand back three DISTINCT sessionIds.
+  const order = ['w-s1', 'w-s2', 'w-s3'];
+  const claimed = new Set();
+  const bound = order.map((label) => { const id = manage.resolveSession(reg.windows[label], claimed); if (id) claimed.add(id); return id; });
+  ok(bound.every(Boolean) && new Set(bound).size === 3, 'BUG-1: three same-cwd windows resolve to three DISTINCT sessionIds (was: all one)');
+  // Without the claimed set (old behavior emulation), they would all grab the same transcript.
+  const naive = order.map((label) => manage.resolveSession(reg.windows[label], new Set()));
+  ok(new Set(naive).size === 1, 'BUG-1 control: with no claim-tracking all three collapse to one — the bug the fix prevents');
+
+  // BUG-2: pane chrome is matched in the bottom rows only — transcript content mentioning
+  // "trust this folder" higher up must NOT be read as the trust prompt.
+  const transcriptDiscussingTrust = 'the code checks "trust this folder" in manage.js\n'
+    + Array(30).fill('  reading source, taking notes, working the mission...').join('\n')
+    + '\n⏺ wrote out/stage-1.md\n❯ \n  ⏵⏵ accept edits on (shift+tab to cycle)';
+  ok(!/trust this folder/i.test(manage.tailLines(transcriptDiscussingTrust)), 'BUG-2: trust phrase up in scrollback is excluded by tailLines');
+  const actualTrustPrompt = 'some output\n'.repeat(30) + 'Do you trust this folder?\n❯ 1. Yes, I trust';
+  ok(/trust this folder/i.test(manage.tailLines(actualTrustPrompt)), 'BUG-2: a real trust prompt at the bottom is still caught');
+}
+
 // --- fire + registry (integration, needs tmux) -------------------------------------------------
 console.log('\nfire (tmux integration)');
 if (!manage.hasTmux()) {

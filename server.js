@@ -710,6 +710,10 @@ function sendJSON(res, code, obj) {
   res.writeHead(code, { 'content-type': 'application/json' });
   res.end(JSON.stringify(obj));
 }
+// JSON safe to inline inside a <script> tag: escape '<' so a "</script>" inside any string can't
+// close the tag. Always used via String.replace's FUNCTION form so '$&'/'$'' in the JSON are never
+// expanded as replacement patterns (BUG-6).
+function jsonForScript(obj) { return JSON.stringify(obj).replace(/</g, '\\u003c'); }
 function readBody(req, res, cb) {
   let b = '', over = false;
   req.on('data', (c) => {
@@ -745,6 +749,13 @@ async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'POST' && !writeAllowed(req)) {
     return sendJSON(res, 403, { ok: false, error: 'forbidden — local origin + X-Conductor header required' });
+  }
+  // BUG-5: the read API exposes transcript titles, last prompts, cwds, and git branches for every
+  // recent Claude session. A DNS-rebinding page could GET /api/* from a rebound origin and harvest
+  // that, so gate the JSON read endpoints on a local Host too (the HTML pages stay open so the
+  // browser can load them normally).
+  if (url.pathname.startsWith('/api/') && !localHost(req)) {
+    return sendJSON(res, 403, { ok: false, error: 'forbidden — local host only' });
   }
 
   if (url.pathname === '/api/config') return sendJSON(res, 200, launchConfig());
@@ -870,12 +881,12 @@ async function handle(req, res) {
 
   if (url.pathname === '/board') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(BOARD.replace('__META__', JSON.stringify({ statuses: statusMeta() })));
+    res.end(BOARD.replace('__META__', () => jsonForScript({ statuses: statusMeta() })));
     return;
   }
   if (url.pathname === '/' || url.pathname === '/index.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(PAD.replace('__CONFIG__', JSON.stringify(launchConfig())).replace('__MODEL__', swarm.MODEL));
+    res.end(PAD.replace('__CONFIG__', () => jsonForScript(launchConfig())).replace('__MODEL__', () => swarm.MODEL));
     return;
   }
   res.writeHead(404, { 'content-type': 'text/plain' });

@@ -110,9 +110,12 @@ function fire(config, opts = {}) {
   const p = plan(config);
   if (!manage.hasTmux()) return { ok: false, error: 'tmux is not installed (brew install tmux).', plan: p };
 
-  // Refuse to double-fire into an existing swarm's windows.
-  const clash = p.agents.find((a) => manage.listManaged().some((w) => w.label === a.window));
-  if (clash) return { ok: false, error: `swarm "${p.swarm}" already has a live window (${clash.window}). Stop it first or pick another name.`, plan: p };
+  // Refuse to fire if ANY target window name is already a live tmux window — not just registry
+  // entries. BUG-4: checking only listManaged() let a manually-created window of the same name slip
+  // through, so manage.run() would fail mid-loop and leave a zombie partial swarm (some windows
+  // already launched + kicked off, no rollback). Pre-checking every name means fire() is all-or-nothing.
+  const clash = p.agents.find((a) => manage.windowAlive(a.window));
+  if (clash) return { ok: false, error: `a window named "${clash.window}" is already live in tmux. Stop it first or pick another swarm name.`, plan: p };
 
   writeSwarmFiles(p);
 

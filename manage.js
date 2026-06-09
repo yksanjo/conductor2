@@ -123,9 +123,15 @@ function uniqueLabel(base, sessionId) {
 // The "trust this folder?" prompt: detect it and accept the default (highlighted "Yes")
 // with Enter. Only sends Enter when the prompt is actually showing, so it can't fire a
 // stray keystroke into an already-trusted session.
+//
+// Claude's prompts/menus/footer always render in the bottom rows of the pane. Match against
+// only the last N lines, never the whole scrollback — otherwise a session whose visible
+// TRANSCRIPT merely *discusses* "trust this folder" (e.g. a swarm reviewing this code) would
+// be misread as sitting at the trust prompt, and we'd fire a stray Enter into a live turn.
+function tailLines(s, n = 16) { const a = String(s).split('\n'); return a.slice(Math.max(0, a.length - n)).join('\n'); }
 function trustPromptShowing(label) {
   const r = tmux(['capture-pane', '-p', '-t', target(label)]);
-  return r.code === 0 && /trust this folder|Yes, I trust|safety check/i.test(r.out);
+  return r.code === 0 && /trust this folder|Yes, I trust|safety check/i.test(tailLines(r.out));
 }
 function answerTrust(label) { return key(label, 'Enter'); }
 
@@ -141,7 +147,7 @@ function answerTrust(label) { return key(label, 'Enter'); }
 function paneStage(label) {
   const r = tmux(['capture-pane', '-p', '-t', target(label)]);
   if (r.code !== 0) return 'gone';
-  const s = r.out;
+  const s = tailLines(r.out);   // BUG-2: match chrome in the bottom rows, not transcript content
   if (/trust this folder|Yes, I trust|safety check/i.test(s)) return 'trust';
   if (/Resume from summary|Resume full session as-is/i.test(s)) return 'resume';
   if (/Compacting conversation/i.test(s)) return 'busy';
@@ -312,18 +318,26 @@ function stop(label) {
 }
 
 // Late-bind a window's sessionId: claude only writes a transcript once you send the first
-// prompt (not at launch / trust prompt), so run()'s capture often misses it. Find the
-// newest .jsonl in the window's cwd created at/after launch.
-function resolveSession(w) {
+// prompt (not at launch / trust prompt), so run()'s capture often misses it.
+//
+// BUG-1 fix: a swarm launches N windows into ONE cwd at ~one instant. The old code bound every
+// missing sessionId to the *newest* .jsonl in that cwd, so all N windows collapsed onto a single
+// transcript — the board could then only group/control one of them. Now we (a) skip transcripts
+// already claimed by another registry entry, and (b) pick the OLDEST qualifying transcript (the
+// one created nearest this window's launch) rather than the newest. Resolving windows in launch
+// order (see listManaged) lets earlier windows claim their earlier transcripts first, so N
+// windows map to N distinct sessions.
+function resolveSession(w, claimed) {
   if (w.sessionId) return w.sessionId;
   try {
     const dir = folderFor(w.cwd);
     const files = fs.readdirSync(dir)
       .filter((f) => f.endsWith('.jsonl'))
-      .map((f) => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .map((f) => ({ id: f.replace(/\.jsonl$/, ''), m: fs.statSync(path.join(dir, f)).mtimeMs }))
       .filter((x) => x.m >= (w.created || 0) - 1500)
-      .sort((a, b) => b.m - a.m);
-    if (files.length) return files[0].f.replace(/\.jsonl$/, '');
+      .filter((x) => !claimed || !claimed.has(x.id))
+      .sort((a, b) => a.m - b.m);
+    if (files.length) return files[0].id;
   } catch { /* ignore */ }
   return null;
 }
@@ -333,10 +347,15 @@ function listManaged() {
   const reg = loadReg();
   const out = [];
   let changed = false;
-  for (const name of Object.keys(reg.windows)) {
+  // Resolve in launch order, tracking already-bound sessionIds, so a same-cwd swarm never
+  // collapses N windows onto one transcript (BUG-1).
+  const names = Object.keys(reg.windows).sort((a, b) => (reg.windows[a].created || 0) - (reg.windows[b].created || 0));
+  const claimed = new Set();
+  for (const name of names) { const sid = reg.windows[name].sessionId; if (sid) claimed.add(sid); }
+  for (const name of names) {
     const w = reg.windows[name];
     if (!windowAlive(name)) { delete reg.windows[name]; changed = true; continue; }
-    if (!w.sessionId) { const sid = resolveSession(w); if (sid) { w.sessionId = sid; changed = true; } }
+    if (!w.sessionId) { const sid = resolveSession(w, claimed); if (sid) { w.sessionId = sid; claimed.add(sid); changed = true; } }
     out.push({ ...w, alive: true });
   }
   if (changed) saveReg(reg);
@@ -353,4 +372,4 @@ function managedBySession() {
   return map;
 }
 
-module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, deliverAdopted, sanitize, hasTmux, SESSION, REG_FILE };
+module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, deliverAdopted, sanitize, windowAlive, tailLines, resolveSession, hasTmux, SESSION, REG_FILE };
