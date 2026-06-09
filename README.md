@@ -7,10 +7,24 @@ tmux + a shared swarm directory, and shows up live on the cockpit board.
 
 Zero dependencies. Claude-only. One model: `claude --model claude-fable-5`, every window, no bikeshedding.
 
+![Conductor V2 launch pad](docs/launch-pad.png)
+
 ```
 npm install -g @yksanjo/conductor2     # or: git clone && npm link
 conductor2 up                          # launch pad → http://localhost:7592
 ```
+
+## Why this is the hard part
+
+A Claude Code session is a terminal TUI, and you **cannot inject input into another process's
+terminal** — macOS removed `TIOCSTI`, the syscall that used to allow it. So "tell agent B to start"
+isn't a function call; it's a control problem. Conductor solves it the way it actually has to be
+solved: every managed agent runs inside a **tmux** session, and the only reliable channel in or out
+is `tmux send-keys`. On top of that raw channel sits a small state machine — `paneStage()` in
+[`manage.js`](manage.js) classifies each window as `trust` / `resume` / `busy` / `ready` / `gone`, so
+a prompt is never typed into a folder-trust dialog or a loading screen and silently lost. "Send a
+message to an agent" is really "drive it from boot to ready, then deliver exactly once." That, not
+the UI, is the engineering.
 
 ## The launch pad
 
@@ -30,6 +44,8 @@ conductor2 up                          # launch pad → http://localhost:7592
 3. **Mission** — the purpose every agent reads, crew size (2–8), folder, permission mode.
 
 4. **🔥 FIRE** — then watch and steer everything from `/board` (V1's cockpit, with swarm grouping).
+
+![Cockpit board with a live swarm](docs/board.png)
 
 Terminal version of the same thing:
 
@@ -55,15 +71,27 @@ Launch order is dependency-aware (receivers before initiators), each window is w
 Claude's startup prompts automatically, and the kickoff is a single line pointing at the agent's
 briefing file — long prompts never travel through tmux.
 
-## Honest seams
+## Design stance (the honest seams, stated plainly)
 
-- **Permission mode matters.** Default is `acceptEdits`; agents still hit permission prompts on
-  Bash (including `swarm-say`), which you can answer from the board — or pre-allowlist
-  `~/.conductor2/bin/swarm-say` in your Claude settings for frictionless coordination.
-  `bypassPermissions` is offered, loudly labeled: full autonomy, full trust.
-- **Agents are LLMs.** The topology and briefings make coordination *likely*, not guaranteed —
-  that's exactly why the board exists. Watch the swarm; nudge any window with a reply.
-- **Stopping a swarm kills live sessions.** Both the UI and CLI gate it behind explicit confirms.
+- **Coordination is probabilistic, and that's the right model.** A topology + briefings make agents
+  hand off, claim distinct angles, and converge on `out/REPORT.md` *reliably*, not *deterministically* —
+  they're LLMs, not a DAG executor. Pretending otherwise would be the junior move. The board **is**
+  the control surface: when an agent drifts, you see it and nudge it with one reply. Supervision is a
+  feature, not a missing guarantee.
+- **Permission mode is an explicit safety dial.** Default `acceptEdits` still surfaces Bash prompts
+  (including `swarm-say`) so you stay in the loop; answer them from the board, or pre-allowlist
+  `~/.conductor2/bin/swarm-say` for frictionless coordination. `bypassPermissions` exists for trusted,
+  unattended runs and is loudly labeled — full autonomy, full trust.
+- **Irreversible actions are gated.** Firing into a live swarm is refused; stopping a swarm (which
+  kills live sessions) needs an explicit confirm token in both the UI and CLI. Every state-changing
+  endpoint is POST-only, localhost-only, and CSRF-guarded.
+
+## Dogfooded on itself
+
+This repo was reviewed by a Conductor V2 swarm: `conductor2 fire --topology pipeline --agents 3`
+launched three Fable 5 agents that read every source file, critiqued it through a hiring manager's
+lens, and merged a ranked report — coordinating entirely over `swarm-say` and the shared `out/`
+directory. The tool reviewing its own code is the demo.
 
 ## Surfaces
 
