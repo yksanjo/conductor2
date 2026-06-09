@@ -115,7 +115,22 @@ console.log('\nswarm files');
   ok(p.agents.every((a) => fs.existsSync(a.briefingPath)), 'every agent has a briefing file');
   const stat = fs.statSync(p.sayPath);
   ok(!!(stat.mode & 0o100), 'swarm-say helper is executable');
-  ok(fs.readFileSync(p.sayPath, 'utf8').includes('conductor2:'), 'swarm-say targets the conductor2 tmux session');
+  ok(p.sayPath.startsWith(p.dir), 'swarm-say is per-swarm (lives in the swarm dir), not a shared global');
+  const sayBody = fs.readFileSync(p.sayPath, 'utf8');
+  ok(sayBody.includes('conductor2:'), 'swarm-say targets the conductor2 tmux session');
+  // dogfood finding #4: the allowlist must be baked in — every member is a case arm, outsiders rejected.
+  ok(p.members.every((w) => sayBody.includes(`    ${w}) ;;`)), 'swarm-say bakes in every member window as an allowed target');
+  ok(/not a member of this swarm — refusing/.test(sayBody), 'swarm-say refuses any window outside the swarm');
+  ok(!sayBody.includes('dogfood-s1') && !sayBody.includes('other-swarm'), 'swarm-say has no cross-swarm targets');
+}
+
+// --- model override (dogfood finding #10: no --model escape hatch) ---------------------------
+console.log('\nmodel override');
+{
+  const def = swarm.plan({ name: 'm', purpose: 'x', topology: 'mesh', agents: 2 });
+  ok(def.model === 'claude-fable-5', 'defaults to claude-fable-5');
+  const over = swarm.plan({ name: 'm', purpose: 'x', topology: 'mesh', agents: 2, model: 'claude-opus-4-8' });
+  ok(over.model === 'claude-opus-4-8' && over.agents[0].claudeArgs.join(' ').includes('--model claude-opus-4-8'), 'config.model overrides the locked default and reaches claudeArgs');
 }
 
 // --- regression: the bugs the dogfood swarm found (unit-level, no tmux) ----------------------

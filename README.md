@@ -10,9 +10,12 @@ Zero dependencies. Claude-only. One model: `claude --model claude-fable-5`, ever
 ![Conductor V2 launch pad](docs/launch-pad.png)
 
 ```
-npm install -g @yksanjo/conductor2     # or: git clone && npm link
+git clone https://github.com/yksanjo/conductor2 && cd conductor2 && npm link
 conductor2 up                          # launch pad → http://localhost:7592
 ```
+
+Requires Node ≥18 and `tmux`. Not on npm yet. Zero install-time dependencies — `npm link` just
+puts the `conductor2` bin on your PATH.
 
 ## Why this is the hard part
 
@@ -58,7 +61,8 @@ conductor2 stop deep-research --yes
 
 ## How a swarm actually coordinates
 
-No message bus, no framework — two dumb, reliable channels:
+No message bus, no framework — two dumb channels with different guarantees. **Files are the source
+of truth; messages are best-effort nudges, with the board as the backstop** when one doesn't land:
 
 - **Files.** Each swarm gets `~/.conductor2/swarms/<name>/` with `mission.md`, per-agent role
   briefings in `prompts/`, artifacts in `out/`, scratch in `notes/`. Files are the source of truth;
@@ -79,25 +83,60 @@ briefing file — long prompts never travel through tmux.
   the control surface: when an agent drifts, you see it and nudge it with one reply. Supervision is a
   feature, not a missing guarantee.
 - **Permission mode is an explicit safety dial.** Default `acceptEdits` still surfaces Bash prompts
-  (including `swarm-say`) so you stay in the loop; answer them from the board, or pre-allowlist
-  `~/.conductor2/bin/swarm-say` for frictionless coordination. `bypassPermissions` exists for trusted,
-  unattended runs and is loudly labeled — full autonomy, full trust.
+  (including `swarm-say`) so you stay in the loop; answer them from the board. `bypassPermissions`
+  exists for trusted, unattended runs and is loudly labeled — full autonomy, full trust.
+- **Agent boundaries are enforced mechanically, not just by prompt.** Each swarm gets its **own**
+  `swarm-say` with its member windows baked in as an allowlist — messaging a window outside the swarm
+  is refused before a keystroke is sent, so a confused (or injected) agent can't cross-talk into
+  another swarm or your personal session. What's still prompt-level (honest): "write only in `out/`"
+  and "treat the repo as read-only" are briefing rules, backed by the permission mode, not the OS.
 - **Irreversible actions are gated.** Firing into a live swarm is refused; stopping a swarm (which
   kills live sessions) needs an explicit confirm token in both the UI and CLI. Every state-changing
-  endpoint is POST-only, localhost-only, and CSRF-guarded.
+  endpoint is POST-only, localhost-only, CSRF-guarded; read endpoints are localhost-gated too.
 
-## Dogfooded on itself
+### Model
 
-This repo was reviewed by a Conductor V2 swarm: `conductor2 fire --topology pipeline --agents 3`
-launched three Fable 5 agents that read every source file, critiqued it through a hiring manager's
-lens, and merged a ranked report — coordinating entirely over `swarm-say` and the shared `out/`
-directory. The tool reviewing its own code is the demo.
+Locked to `claude-fable-5` by default — that's the point of V2, maximum power with no per-window
+bikeshedding. It's a default, not a cage: override per-swarm with `conductor2 fire --model <id>` or
+globally with `CONDUCTOR2_MODEL=<id>`, so the tool doesn't rot when a stronger model ships.
+
+### What's deliberately *not* claimed yet
+
+The pitch is coordination reliability, so the honest gap is that it isn't **quantified** yet — no
+N-run completion rates per preset, no single-agent baseline, no cost/latency table. That eval harness
+is the next build, not a shipped claim. One real data point so far: the 3-stage dogfood run below
+completed end to end with both handoffs (s1→s2→s3) landing unattended.
+
+## Dogfooded on itself — and it found real bugs
+
+This repo was reviewed *by a Conductor V2 swarm reviewing itself*. `conductor2 fire --topology
+pipeline --agents 3` launched three Fable 5 agents that read all ~2,600 lines, ran the test suite,
+critiqued the repo through a hiring manager's lens, and merged a ranked report — coordinating
+entirely over `swarm-say` and the shared `out/` directory ([docs/dogfood-report.md](docs/dogfood-report.md)).
+
+It didn't rubber-stamp itself. Stage 1 found **six real bugs with file:line**, including one it
+**verified live against its own registry** (BUG-1: agents launched into one folder all bound to the
+same transcript, breaking the cockpit's swarm grouping — the headline feature). All six are now
+fixed in [commit `77b3641`](https://github.com/yksanjo/conductor2/commit/77b3641) with regression
+tests. The tool finding, and surviving, its own review is the demo.
 
 ## Surfaces
 
 - `conductor2 up` — launch pad (`/`) + cockpit board (`/board`) on `:7592`
 - `conductor2 fire|plan|presets|swarms|stop` — the same fire control from the terminal
 - All state-changing endpoints are POST-only, localhost-only, CSRF-guarded (V1's scheme)
+
+## Testing
+
+```
+npm test     # 59 assertions, zero mocks
+```
+
+Real modules against a sandboxed `$HOME`, real `node:http` against the actual request handler, real
+tmux fire→list→stop integration (self-skips if tmux is absent), and negative cases: CSRF 403,
+double-fire refusal, missing confirm tokens, the swarm-say allowlist refusing outsiders, and
+regression tests for every bug the dogfood swarm found. CI runs the suite on every push
+([`.github/workflows/test.yml`](.github/workflows/test.yml)).
 
 Same design system and data pipeline as V1 (transcript scanner, liveness via `lsof`, tmux control
 plane) — V2 adds the pre-flight layer on top.

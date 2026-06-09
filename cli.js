@@ -11,7 +11,7 @@
 //   conductor2 stop  <swarm> --yes               kill every window of a swarm
 //
 // Overrides: --purpose "…" --name x --topology hierarchical|pipeline|mesh --agents N
-//            --cwd ~/dir --perm acceptEdits|default|plan|bypassPermissions
+//            --cwd ~/dir --perm acceptEdits|default|plan|bypassPermissions --model <claude-id>
 
 const { spawn } = require('child_process');
 const path = require('path');
@@ -31,6 +31,7 @@ function parseOverrides(argv) {
     else if (v === '--agents') o.agents = parseInt(argv[++i], 10);
     else if (v === '--cwd') o.cwd = argv[++i];
     else if (v === '--perm') o.permissionMode = argv[++i];
+    else if (v === '--model') o.model = argv[++i];
     else if (v === '--yes') o.yes = true;
     else if (!v.startsWith('--') && !o._preset) o._preset = v;
   }

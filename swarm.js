@@ -52,15 +52,20 @@ function plan(config = {}) {
   let cwd = String(config.cwd || '').trim() || HOME;
   cwd = cwd.replace(/^~(?=$|\/)/, HOME);
 
+  const model = String(config.model || '').trim() || MODEL;
+
   const dir = path.join(SWARMS_DIR, swarm);
-  const sayPath = path.join(BIN_DIR, 'swarm-say');
+  // Per-swarm message script (not the old shared one): it bakes in this swarm's member windows as
+  // an allowlist, so "never message a window outside your swarm" is enforced mechanically, not by
+  // prompt discipline (dogfood finding #4).
+  const sayPath = path.join(dir, 'swarm-say');
 
   // Roles → concrete agents with window names + briefings.
   const roles = topo.roles(n, hints);
   const agents = roles.map((r) => ({ ...r, window: manage.sanitize(`${swarm}-${r.slot}`), role: r.role }));
   const ctx = { swarm, topology: topo.key, purpose, dir, sayPath, agents };
 
-  const claudeArgs = ['--model', MODEL];
+  const claudeArgs = ['--model', model];
   if (permissionMode !== 'default') claudeArgs.push('--permission-mode', permissionMode);
 
   for (const a of agents) {
@@ -76,28 +81,37 @@ function plan(config = {}) {
 
   const placeholders = (purpose.match(/<[A-Z][^>]*>/g) || []);
   return {
-    swarm, topology: topo.key, purpose, cwd, permissionMode, model: MODEL,
-    dir, sayPath, agents, launchOrder: order.map((a) => a.window),
+    swarm, topology: topo.key, purpose, cwd, permissionMode, model,
+    dir, sayPath, agents, members: agents.map((a) => a.window), launchOrder: order.map((a) => a.window),
     warnings: placeholders.length ? [`purpose still contains template placeholder(s): ${placeholders.join(' ')}`] : [],
   };
 }
 
-// The messaging helper every briefing references. One line in, tmux send-keys out. Written
-// once; rewritten on every fire so upgrades propagate.
-const SAY_SCRIPT = `#!/bin/sh
-# swarm-say <window> <message...> — deliver a one-line message to a conductor2 swarm agent.
+// The per-swarm messaging helper every briefing references. One line in, tmux send-keys out.
+// The swarm's member windows are baked in as an allowlist: a target outside the swarm is refused
+// before any keystroke is sent, so an agent can't cross-talk into another swarm or a user's own
+// session even if its prompt tells it to (dogfood finding #4 — mechanical boundary, not prose).
+function sayScript(members) {
+  const cases = members.map((w) => `    ${w}) ;;`).join('\n');
+  return `#!/bin/sh
+# swarm-say <window> <message...> — deliver a one-line message to a fellow agent in THIS swarm.
+# Members of this swarm (the only valid targets): ${members.join(', ')}
 [ -n "$1" ] && [ -n "$2" ] || { echo "usage: swarm-say <window> <message>" >&2; exit 1; }
 W="$1"; shift
+case "$W" in
+${cases}
+    *) echo "swarm-say: \\"$W\\" is not a member of this swarm — refusing. Members: ${members.join(', ')}" >&2; exit 2 ;;
+esac
 tmux send-keys -t "conductor2:$W" -l -- "$*" && sleep 0.3 && tmux send-keys -t "conductor2:$W" Enter
 `;
+}
 
 // Write the swarm's on-disk home: mission, briefings, helper script, empty work dirs.
 function writeSwarmFiles(p) {
   fs.mkdirSync(path.join(p.dir, 'prompts'), { recursive: true });
   fs.mkdirSync(path.join(p.dir, 'out'), { recursive: true });
   fs.mkdirSync(path.join(p.dir, 'notes'), { recursive: true });
-  fs.mkdirSync(BIN_DIR, { recursive: true });
-  fs.writeFileSync(p.sayPath, SAY_SCRIPT, { mode: 0o755 });
+  fs.writeFileSync(p.sayPath, sayScript(p.members), { mode: 0o755 });
   fs.writeFileSync(path.join(p.dir, 'mission.md'),
     `# Swarm: ${p.swarm}\n\n- topology: ${p.topology}\n- model: ${p.model}\n- cwd: ${p.cwd}\n- permission mode: ${p.permissionMode}\n- fired: ${new Date().toISOString()}\n\n## Purpose\n${p.purpose}\n\n## Crew\n${p.agents.map((a) => `- ${a.window} — ${a.role}`).join('\n')}\n`);
   for (const a of p.agents) fs.writeFileSync(a.briefingPath, a.briefing);
