@@ -116,17 +116,22 @@ identical on any model. Real run ([evals/RESULTS.md](evals/RESULTS.md), `pipelin
 
 | metric | value |
 |---|---|
-| **completion rate** (REPORT.md within 200s) | **67%** (2/3 runs) |
-| handoff success (baton lines landed / expected) | 67% (6/9) |
-| median wall-clock, completed runs | 61s |
-| single-agent baseline, same deliverable | **13s** |
+| **completion rate** (REPORT.md within 240s) | **80%** (4/5 runs) |
+| **handoff success** (baton lines landed / expected) | **100%** (15/15) |
+| median wall-clock, completed runs | 91s |
+| single-agent baseline, same deliverable | **26s** |
 
-**Read it honestly:** for a *linear* 3-stage chain, one agent is ~5× faster and 100% reliable —
-multi-agent coordination has real overhead and a real tail-failure rate (one run stalled when a
-handoff didn't land). So the harness doubles as a decision tool: **use a swarm for parallelizable
-breadth** (4 researchers hitting 4 angles at once), **not for a sequence one agent can do faster** —
-and when a handoff is dropped, the board's stalled-detector is the backstop. That tradeoff being
-visible and quantified is the point; `npm run eval --runs 10` re-measures it for your own setup.
+**Read it honestly:** for a *linear* 3-stage chain, one agent is ~3.5× faster — multi-agent
+coordination has real overhead even when it's reliable. The handoff machinery itself went 15/15;
+the one incomplete run relayed every baton and then the cheap relay model idled without writing the
+final file (model behavior, attributable in the per-run log — that's why the logs exist). An
+earlier batch scored **67%** completion because a TUI startup race could silently eat a launch
+kickoff; the eval caught it, and the fix (verified kickoff delivery + an idle-initiator watchdog —
+see RESULTS.md) ended the lost-kickoff failures: 0 retries needed across the 10 runs since. So the
+harness doubles as a decision tool: **use a swarm for parallelizable breadth** (4 researchers
+hitting 4 angles at once), **not for a sequence one agent can do faster** — and when a handoff is
+dropped, the board's stalled-detector is the backstop. That tradeoff being visible and quantified
+is the point; `npm run eval -- --runs 10` re-measures it for your own setup.
 
 ## Dogfooded on itself — and it found real bugs
 
@@ -154,7 +159,7 @@ then surviving, and being improved by — its own review is the demo.
 ## Testing
 
 ```
-npm test     # 59 assertions, zero mocks
+npm test     # 68 assertions, zero mocks
 ```
 
 Real modules against a sandboxed `$HOME`, real `node:http` against the actual request handler, real

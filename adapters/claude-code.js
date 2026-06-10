@@ -207,7 +207,8 @@ function listOpenWindows() {
     }
   }
   for (const [cwd, k] of cwdCounts) {
-    const dir = path.join(PROJECTS_DIR, cwd.replace(/\//g, '-'));
+    // Same transform as manage.js folderFor(): Claude replaces every non-alphanumeric, not just '/'.
+    const dir = path.join(PROJECTS_DIR, cwd.replace(/[^A-Za-z0-9]/g, '-'));
     let names;
     try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); }
     catch { continue; }

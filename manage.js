@@ -36,7 +36,10 @@ function saveReg(reg) {
   fs.writeFileSync(REG_FILE, JSON.stringify(reg, null, 2));
 }
 
-function folderFor(cwd) { return path.join(PROJECTS_DIR, cwd.replace(/\//g, '-')); }
+// Claude Code names a transcript dir by replacing EVERY non-alphanumeric code unit of the cwd
+// with '-' (runs not collapsed) — not just slashes. A '/'-only transform silently loses any swarm
+// whose cwd contains '.', '_', a space, or non-ASCII.
+function folderFor(cwd) { return path.join(PROJECTS_DIR, cwd.replace(/[^A-Za-z0-9]/g, '-')); }
 function jsonlSet(cwd) {
   try { return new Set(fs.readdirSync(folderFor(cwd)).filter((f) => f.endsWith('.jsonl'))); }
   catch { return new Set(); }

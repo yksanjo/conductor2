@@ -65,7 +65,10 @@ function plan(config = {}) {
   const agents = roles.map((r) => ({ ...r, window: manage.sanitize(`${swarm}-${r.slot}`), role: r.role }));
   const ctx = { swarm, topology: topo.key, purpose, dir, sayPath, agents };
 
-  const claudeArgs = ['--model', model];
+  // The swarm dir holds the briefings, notes/, and out/ handoff files, but it lives outside the
+  // agents' cwd — without --add-dir, acceptEdits doesn't cover it and every stage stalls on a
+  // "create stage-N.md?" prompt (dogfood finding: pipeline froze when cwd != ~).
+  const claudeArgs = ['--model', model, '--add-dir', dir];
   if (permissionMode !== 'default') claudeArgs.push('--permission-mode', permissionMode);
 
   for (const a of agents) {

@@ -4,7 +4,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "description": "Conductor V2 — configure the swarm before you fire it. Pick a topology (hierarchical / pipeline / mesh), load a preset (deep research / market bots / web3+security), set the purpose, FIRE: a fleet of Claude Code windows on Fable 5, coordinating over tmux, watched from one cockpit.",
+  "description": "Conductor V2 \u2014 configure the swarm before you fire it. Pick a topology (hierarchical / pipeline / mesh), load a preset (deep research / market bots / web3+security), set the purpose, FIRE: a fleet of Claude Code windows on Fable 5, coordinating over tmux, watched from one cockpit.",
   "bin": {
     "conductor2": "cli.js"
   },
@@ -27,6 +27,9 @@
     "lib.js",
     "util.js",
     "adapters/claude-code.js",
+    "test.js",
+    "evals/coordination.mjs",
+    "evals/RESULTS.md",
     "README.md",
     "LICENSE"
   ],

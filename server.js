@@ -909,7 +909,9 @@ async function handle(req, res) {
   }
   if (url.pathname === '/' || url.pathname === '/index.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(PAD.replace('__CONFIG__', () => jsonForScript(launchConfig())).replace('__MODEL__', () => swarm.MODEL));
+    // MODEL comes from an env var; escape it — it lands in element text, not a JS string.
+    res.end(PAD.replace('__CONFIG__', () => jsonForScript(launchConfig()))
+      .replace('__MODEL__', () => String(swarm.MODEL).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))));
     return;
   }
   res.writeHead(404, { 'content-type': 'text/plain' });

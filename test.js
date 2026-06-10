@@ -133,6 +133,9 @@ console.log('\nmodel override');
   ok(def.model === 'claude-fable-5', 'defaults to claude-fable-5');
   const over = swarm.plan({ name: 'm', purpose: 'x', topology: 'mesh', agents: 2, model: 'claude-opus-4-8' });
   ok(over.model === 'claude-opus-4-8' && over.agents[0].claudeArgs.join(' ').includes('--model claude-opus-4-8'), 'config.model overrides the locked default and reaches claudeArgs');
+  // The swarm dir (briefings, notes/, out/) lives outside the agents' cwd; without --add-dir,
+  // acceptEdits doesn't cover it and every pipeline stage stalls on a file-write prompt.
+  ok(def.agents[0].claudeArgs.join(' ').includes(`--add-dir ${def.dir}`), 'claudeArgs grant --add-dir on the swarm dir so handoff writes are auto-accepted');
 }
 
 // --- regression: the bugs the dogfood swarm found (unit-level, no tmux) ----------------------
@@ -141,7 +144,7 @@ console.log('\nregressions (dogfood findings)');
   // BUG-1: N windows sharing one cwd must resolve to N DISTINCT sessionIds, not collapse onto the
   // newest transcript. Build a fake registry + transcripts and drive listManaged().
   const cwd = path.join(SANDBOX, 'work'); fs.mkdirSync(cwd, { recursive: true });
-  const projDir = path.join(SANDBOX, '.claude', 'projects', cwd.replace(/\//g, '-'));
+  const projDir = path.join(SANDBOX, '.claude', 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'));
   fs.mkdirSync(projDir, { recursive: true });
   const base = Date.now() - 5000;
   // three transcripts, staggered mtimes, all newer than the windows' launch
@@ -182,6 +185,18 @@ console.log('\nregressions (dogfood findings)');
   ok(C('Do you trust this folder?\n❯ 1. Yes, I trust') === 'trust', 'trust prompt classified');
   ok(C('Resume from summary\nResume full session as-is') === 'resume', 'resume picker classified');
   ok(C('? for shortcuts') === 'ready' && C('loading a huge transcript…') === 'busy', 'ready footer vs unknown=busy');
+
+  // F1 (finishline swarm): Claude transforms EVERY non-alphanumeric cwd char to '-', not just '/'.
+  // A cwd with '.', '_', or a space must still resolve — the old '/'-only transform computed a
+  // directory that doesn't exist and silently lost the swarm from the cockpit.
+  const oddCwd = path.join(SANDBOX, 'repo.v2_x y');
+  fs.mkdirSync(oddCwd, { recursive: true });
+  const oddProj = path.join(SANDBOX, '.claude', 'projects', oddCwd.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(oddProj, { recursive: true });
+  const oddF = path.join(oddProj, 'odd1.jsonl');
+  fs.writeFileSync(oddF, '{}\n');
+  const oddReg = { label: 'odd-s1', target: 'conductor2:odd-s1', cwd: oddCwd, created: Date.now() - 5000, sessionId: null, swarm: 'odd' };
+  ok(manage.resolveSession(oddReg, new Set()) === 'odd1', "F1: cwd with '.', '_', and space still resolves its transcript (was: silently lost)");
 }
 
 // --- fire + registry (integration, needs tmux) -------------------------------------------------

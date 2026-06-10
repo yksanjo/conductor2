@@ -20,7 +20,7 @@
 // burn Fable 5 tokens measuring tmux handoffs.
 //
 //   node evals/coordination.mjs [--runs N] [--agents K] [--topology pipeline|hierarchical|mesh]
-//                               [--timeout SEC] [--model <id>] [--baseline]
+//                               [--timeout SEC] [--model <id>] [--no-baseline]
 //
 // Writes evals/RESULTS.md and prints a table. Requires tmux + a working `claude` CLI.
 
