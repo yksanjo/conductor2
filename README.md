@@ -10,12 +10,12 @@ Zero dependencies. Claude-only. One model: `claude --model claude-fable-5`, ever
 ![Conductor V2 launch pad](docs/launch-pad.png)
 
 ```
-git clone https://github.com/yksanjo/conductor2 && cd conductor2 && npm link
+npm install -g @yksanjo/conductor2
 conductor2 up                          # launch pad → http://localhost:7592
 ```
 
-Requires Node ≥18, `tmux`, and the `claude` CLI. Not on npm yet. Zero install-time dependencies —
-`npm link` just puts the `conductor2` bin on your PATH.
+Requires Node ≥18, `tmux`, and the `claude` CLI. Zero install-time dependencies — the install just
+puts the `conductor2` bin on your PATH. (From a clone: `npm link` does the same.)
 
 ## Why this is the hard part
 
