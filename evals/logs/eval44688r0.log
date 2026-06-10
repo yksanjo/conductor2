@@ -1,0 +1,11 @@
+0.3s eval44688r0-s2 → busy
+0.3s eval44688r0-s3 → busy
+0.3s eval44688r0-s1 → busy
+3.0s eval44688r0-s2 → ready
+3.0s eval44688r0-s3 → ready
+3.0s eval44688r0-s1 → ready
+5.6s eval44688r0-s2 → running
+5.6s eval44688r0-s3 → running
+5.6s eval44688r0-s1 → running
+23.8s eval44688r0-s1 → ready
+34.2s end: completed · baton 3/3

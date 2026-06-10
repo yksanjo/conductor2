@@ -15,7 +15,6 @@
 //   status(record, ctx)       -> a status string from record.statusInputs     (optional)
 //   project(baseRow)          -> the public row shape for this domain          (optional)
 //   statuses                  -> ordered status vocabulary [{key,title,...}]   (optional)
-//   control                   -> { capabilities, send, broadcast }            (optional)
 //
 // Normalized record (the stable contract):
 //   { id, shortId, label, title, intent, context[], recent[{actor,kind,summary,ts}],

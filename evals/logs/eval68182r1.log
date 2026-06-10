@@ -1,0 +1,8 @@
+0.3s eval68182r1-s2 → busy
+0.3s eval68182r1-s3 → busy
+0.3s eval68182r1-s1 → busy
+8.1s eval68182r1-s2 → running
+8.1s eval68182r1-s3 → running
+8.1s eval68182r1-s1 → ready
+10.7s eval68182r1-s1 → running
+72.9s end: completed · baton 3/3

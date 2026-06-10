@@ -64,6 +64,9 @@ function plan(config = {}) {
   if (!/^[A-Za-z0-9._-]+$/.test(model)) throw new Error(`invalid model "${model}" — letters, digits, dots, dashes and underscores only`);
 
   const dir = path.join(SWARMS_DIR, swarm);
+  // The swarm dir rides into a shell line as `--add-dir <dir>` (manage.run single-quotes it, which
+  // covers spaces and metachars — but no quoting survives a newline in a send-keys line).
+  if (/[\r\n]/.test(dir)) throw new Error('swarm directory path contains a newline — refusing to fire');
   // Per-swarm message script (not the old shared one): it bakes in this swarm's member windows as
   // an allowlist, so "never message a window outside your swarm" is enforced mechanically, not by
   // prompt discipline (dogfood finding #4).
@@ -178,7 +181,7 @@ function fire(config, opts = {}) {
 // Live swarms, grouped from the managed-window registry.
 function listSwarms() {
   const groups = {};
-  for (const w of manage.listManaged()) {
+  for (const w of manage.listManaged({ readonly: true })) {
     if (!w.swarm) continue;
     (groups[w.swarm] = groups[w.swarm] || { swarm: w.swarm, topology: w.topology, dir: path.join(SWARMS_DIR, w.swarm), windows: [] })
       .windows.push({ window: w.label, role: w.role, slot: w.slot, sessionId: w.sessionId });
@@ -186,13 +189,17 @@ function listSwarms() {
   return Object.values(groups);
 }
 
-// Kill every window of one swarm. Irreversible — callers gate it.
+// Kill every window of one swarm. Irreversible — callers gate it. A failed kill must not be
+// reported as stopped: stopped[]/failed[] carry the honest per-window outcome (manage.stop only
+// drops the registry entry when the window is actually gone).
 function stopSwarm(name) {
   const swarm = sanitizeSwarm(name);
-  const members = manage.listManaged().filter((w) => w.swarm === swarm);
+  const members = manage.listManaged({ readonly: true }).filter((w) => w.swarm === swarm);
   if (!members.length) return { ok: false, error: `no live swarm "${swarm}"` };
-  const stopped = members.map((w) => manage.stop(w.label));
-  return { ok: stopped.every((r) => r.ok), swarm, stopped: stopped.map((r) => r.label) };
+  const results = members.map((w) => manage.stop(w.label));
+  const stopped = results.filter((r) => r.ok).map((r) => r.label);
+  const failed = results.filter((r) => !r.ok).map((r) => r.label);
+  return { ok: failed.length === 0, swarm, stopped, failed };
 }
 
 module.exports = { plan, fire, writeSwarmFiles, listSwarms, stopSwarm, sanitizeSwarm, MODEL, PERMISSION_MODES, SWARMS_DIR, V2_DIR };

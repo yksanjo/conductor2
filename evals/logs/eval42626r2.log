@@ -1,0 +1,9 @@
+0.3s eval42626r2-s2 → busy
+0.4s eval42626r2-s3 → busy
+0.4s eval42626r2-s1 → busy
+3.2s eval42626r2-s2 → ready
+3.3s eval42626r2-s3 → ready
+5.9s eval42626r2-s2 → running
+5.9s eval42626r2-s3 → running
+5.9s eval42626r2-s1 → running
+65.5s end: completed · baton 3/3

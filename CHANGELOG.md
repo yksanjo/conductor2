@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.1.0
+
+A harsh-review hardening pass on the machinery under the launch pad — the registry, the
+process budget, and the places where the tool's reporting was more confident than its delivery.
+
+- **The registry survives the concurrency the product itself creates.** `~/.conductor2/managed.json`
+  was a multi-process read-modify-write race (every `swarm-say` re-wrote it, racing the server's
+  4s poll), written non-atomically, and a torn write silently reset it to empty. Now: atomic
+  temp-file + rename writes, a `readonly` mode for every pure-read caller, and corruption is
+  backed up to `managed.json.corrupt-<pid>` and reported loudly instead of swallowed.
+- **One `tmux list-windows` per poll instead of one per window.** An 8-agent swarm cost ~30
+  blocking process spawns every 4 seconds; `listManaged` now lists once and checks membership in
+  memory, and the 350ms delivery settle no longer spawns a `sleep` process (`Atomics.wait`).
+- **Honest results on the two endpoints that overstated theirs.** `/api/rekick` reported success
+  before delivery started (now `status: 'delivering'`, and the toast says so); `stopSwarm`
+  counted failed `kill-window`s as stopped (now returns `stopped[]` + `failed[]`, keeps the
+  registry entry for windows it couldn't kill, and the CLI exits non-zero).
+- **Launch args are shell-quoted.** The typed `claude …` command was a bare string join — a
+  swarm dir with a space or quote would word-split into the pane's shell. Empty replies are
+  refused before a keystroke (a bare Enter used to count as "sent").
+- **The cited evidence now ships.** `evals/logs/` was gitignored while the README pointed at it;
+  the per-run logs are committed and the run-count claims match what's shipped.
+- Vendored-fork honesty: stale V1-only comments corrected, dead exports removed (`statuses_`,
+  `control`, `waitingForYou`), the intentional `~/.conductor/labels.json` sharing with V1 is
+  documented instead of implicit. Recruiter framing stripped from the public dogfood reports.
+- 14 new tests (delivery-status transitions, empty-text refusal, shell quoting, registry
+  corruption recovery): **104 passed, 0 failed.**
+
 ## 2.0.0
 
 Conductor V2 — configure the swarm **before** you fire it. A web launch pad (`:7592`) that turns
@@ -27,7 +55,7 @@ The history of this release is the tool reviewing itself, twice, and surviving:
   non-alphanumeric char (swarms in `repo.v2`-style folders were invisible), `--add-dir` on the
   swarm dir so pipeline stages don't stall on write prompts, `files[]` completeness, README claims
   trued up.
-- **Hardening pass (this one).** Permission menus are now a first-class pane stage: text delivery
+- **Hardening pass.** Permission menus are now a first-class pane stage: text delivery
   to a menu is refused (it would be eaten as a selection) and the board grows one-click
   **approve/deny** buttons — same detection the eval auto-approver uses. Lost kickoffs are no
   longer invisible: a swarm window with no transcript surfaces as a "kickoff lost?" card after 90s

@@ -98,7 +98,7 @@ res.end(PAD.replace('__CONFIG__', () => jsonForScript(launchConfig()))
 - `evals/coordination.mjs` usage comment lists `[--baseline]` but the parser only knows `--no-baseline`.
 - CI tests Node 20 only while `engines` declares `>=18` — consider a small version matrix.
 - `presets.js` example purposes mention `~/soag-gate` / `agentsoag.com` — illustrative but slightly personal; swap for neutral examples if you care.
-- Verifier probe leftovers exist on this machine and can be deleted: `/tmp/verify_f1.s3_dir`, `/tmp/f1__t..2`, `/tmp/テストf1`, `/tmp/f4probe`, and transcript dirs `~/.claude/projects/-private-tmp-{verify-f1-s3-dir,f1--t--2,----f1}`.
+- Verifier probe leftovers exist on the dev machine and can be deleted: a handful of throwaway probe dirs under `/tmp/` (used for the F1 cwd-transform repros) and their matching transcript dirs under `~/.claude/projects/`.
 
 ## Recommended order to the finish line
 

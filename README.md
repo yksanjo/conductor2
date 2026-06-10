@@ -65,8 +65,8 @@ No message bus, no framework — two dumb channels with different guarantees. **
 of truth; messages are best-effort nudges, with the board as the backstop** when one doesn't land:
 
 - **Files.** Each swarm gets `~/.conductor2/swarms/<name>/` with `mission.md`, per-agent role
-  briefings in `prompts/`, artifacts in `out/`, scratch in `notes/`. Files are the source of truth;
-  the final deliverable is always `out/REPORT.md`.
+  briefings in `prompts/`, artifacts in `out/`, scratch in `notes/`. The final deliverable is
+  always `out/REPORT.md`.
 - **Messages.** Each swarm gets its **own** `swarm-say <window> "<one line>"` in its directory. Two
   guarantees the raw `tmux send-keys` version lacked: (1) the target must be a live member of *this*
   swarm — its members are baked into the script as an allowlist, so an agent can't cross-talk into
@@ -95,11 +95,10 @@ one-click re-kickoff that re-delivers the stored kickoff through the verified-de
   "don't ask again" option when offered; deny sends Esc) — free-text replies to a menu are refused,
   because the menu would eat them as a selection. `bypassPermissions` exists for trusted, unattended
   runs and is loudly labeled — full autonomy, full trust.
-- **Agent boundaries are enforced mechanically, not just by prompt.** Each swarm gets its **own**
-  `swarm-say` with its member windows baked in as an allowlist — messaging a window outside the swarm
-  is refused before a keystroke is sent, so a confused (or injected) agent can't cross-talk into
-  another swarm or your personal session. What's still prompt-level (honest): "write only in `out/`"
-  and "treat the repo as read-only" are briefing rules, backed by the permission mode, not the OS.
+- **Agent boundaries are enforced mechanically, not just by prompt** — the per-swarm `swarm-say`
+  allowlist above refuses an out-of-swarm target before a keystroke is sent. What's still
+  prompt-level (honest): "write only in `out/`" and "treat the repo as read-only" are briefing
+  rules, backed by the permission mode, not the OS.
 - **Irreversible actions are gated.** Firing into a live swarm is refused; stopping a swarm (which
   kills live sessions) needs an explicit confirm token in both the UI and CLI. Every state-changing
   endpoint is POST-only, localhost-only, CSRF-guarded; read endpoints are localhost-gated too.
@@ -129,10 +128,12 @@ identical on any model. Real run ([evals/RESULTS.md](evals/RESULTS.md), `pipelin
 **Read it honestly:** for a *linear* 3-stage chain, one agent is ~3.5× faster — multi-agent
 coordination has real overhead even when it's reliable. The handoff machinery itself went 15/15;
 the one incomplete run relayed every baton and then the cheap relay model idled without writing the
-final file (model behavior, attributable in the per-run log — that's why the logs exist). An
+final file (model behavior, attributable in the per-run pane-stage logs shipped in
+[evals/logs/](evals/logs/) — that's why the logs exist). An
 earlier batch scored **67%** completion because a TUI startup race could silently eat a launch
 kickoff; the eval caught it, and the fix (verified kickoff delivery + an idle-initiator watchdog —
-see RESULTS.md) ended the lost-kickoff failures: 0 retries needed across the 10 runs since. So the
+see RESULTS.md) ended the lost-kickoff failures: 0 kickoff retries across the published 5-run
+batch. So the
 harness doubles as a decision tool: **use a swarm for parallelizable breadth** (4 researchers
 hitting 4 angles at once), **not for a sequence one agent can do faster** — and when a handoff is
 dropped, the board's stalled-detector is the backstop. That tradeoff being visible and quantified
@@ -160,8 +161,9 @@ V2 is self-contained — it bundles its own watcher (the `/board` cockpit is
 [V1](https://github.com/yksanjo/conductor)'s board re-skinned), so you don't need V1 installed.
 The two are isolated by design: V1 uses tmux session `conductor` + `~/.conductor/managed.json`,
 V2 uses `conductor2` + `~/.conductor2/managed.json` — a V2 swarm is invisible to a running V1
-cockpit, and vice versa. V2 is the superset for fleets you fire; V1 remains the watcher for
-windows you opened by hand.
+cockpit, and vice versa. The one deliberate exception: they share `~/.conductor/labels.json`,
+so your project names follow you between the two. V2 is the superset for fleets you fire; V1
+remains the watcher for windows you opened by hand.
 
 Where this goes next — standing missions, verified outcomes, one decision inbox — is sketched
 in [docs/V3.md](docs/V3.md).
@@ -176,7 +178,7 @@ in [docs/V3.md](docs/V3.md).
 ## Testing
 
 ```
-npm test     # 90 assertions, zero mocks
+npm test     # 104 assertions, zero mocks
 ```
 
 Real modules against a sandboxed `$HOME`, real `node:http` against the actual request handler, real

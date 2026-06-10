@@ -7,8 +7,8 @@
 // ~/.claude/projects/<dir>/<session-id>.jsonl. Read-only observation; control rides the tmux
 // channel in manage.js (the same one the cockpit uses).
 //
-// Engine output for this adapter is equivalent to Conductor's pre-engine behavior — the
-// existing test suite (test.js / mcp.test.js / server.test.js) proves it.
+// Engine output for this adapter is equivalent to Conductor's pre-engine behavior — V2's test
+// suite (test.js) exercises it through the server's /api/sessions path.
 
 const fs = require('fs');
 const path = require('path');
@@ -16,10 +16,11 @@ const os = require('os');
 const readline = require('readline');
 const { execSync } = require('child_process');
 const { clip, prettify } = require('../util');
-const manage = require('../manage');
 
 const HOME = os.homedir();
 const PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
+// Deliberately V1's directory, not ~/.conductor2: label overrides are user preferences, shared
+// across both Conductors so your project names follow you.
 const LABELS_FILE = path.join(HOME, '.conductor', 'labels.json');
 const RING = 40; // keep last N message-bearing records per session
 
@@ -174,16 +175,6 @@ function statusOf(lastActivityTs, isOpen) {
   return 'idle';
 }
 
-// "Needs you": a LIVE window where Claude has spoken last and then gone quiet — sitting at the
-// prompt waiting for your reply. Keyed off a live process so closed/idle transcripts don't nag,
-// and requires a few seconds of quiet so a still-streaming response isn't flagged.
-function waitingForYou(row) {
-  if (!row.live || !row.recent.length) return false;
-  const last = row.recent[row.recent.length - 1];
-  const quietSec = (Date.now() - row.lastActiveTs) / 1000;
-  return last.actor === 'assistant' && last.kind === 'text' && quietSec >= 15;
-}
-
 // Detect actually-open windows by their running `claude` process. The transcript file isn't held
 // open, so process presence (not file mtime) is the real "this window is open" signal. Many
 // windows can share one cwd, so for a cwd with K live procs we treat the K most-recently-used
@@ -281,9 +272,9 @@ async function parse(file) {
 function status(rec, ctx) { return statusOf(rec.statusInputs.lastActivityTs, !!(ctx && ctx.live)); }
 
 // Project the engine's base row into Conductor's historical public shape, so collectSessions()
-// and the surfaces see exactly the fields they always have (open/waiting/project/place/...).
+// and the surfaces see exactly the fields they always have (open/project/place/...).
 function project(base) {
-  return { ...base, open: base.live, waiting: waitingForYou(base) };
+  return { ...base, open: base.live };
 }
 
 const statuses = [
@@ -293,21 +284,8 @@ const statuses = [
   { key: 'idle', title: 'IDLE', word: 'idle', color: 'dim' },
 ];
 
-// Uniform control surface. The Claude cockpit/MCP paths still call manage.js directly (adopt,
-// run, broadcast) for their richer flows; this object exists so every adapter exposes control
-// the same way for generic callers.
-const control = {
-  capabilities: ['reply', 'key', 'run', 'broadcast'],
-  send(target, command = {}) {
-    return command.key ? manage.key(target, command.key) : manage.say(target, command.text || '');
-  },
-  broadcast(command = {}) {
-    return manage.sayAll(command.key ? { key: command.key } : { text: command.text || '' });
-  },
-};
-
 module.exports = {
-  discover, liveness, parse, status, project, statuses, control,
-  // exported for the surfaces / back-compat
-  labelFor, statuses_: statuses, PROJECTS_DIR, LABELS_FILE,
+  discover, liveness, parse, status, project, statuses,
+  // exported for the surfaces
+  labelFor, PROJECTS_DIR, LABELS_FILE,
 };

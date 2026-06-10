@@ -40,13 +40,7 @@ function colorHex(name) {
 }
 function statusMeta() {
   const claude = require('./adapters/claude-code');
-  const statuses = claude.statuses || [
-    { key: 'active', title: 'WORKING', word: 'working', color: 'green' },
-    { key: 'open', title: 'OPEN', word: 'open', color: 'cyan' },
-    { key: 'recent', title: 'RECENT', word: 'recent', color: 'amber' },
-    { key: 'idle', title: 'IDLE', word: 'idle', color: 'dim' },
-  ];
-  return statuses.map((s) => ({ key: s.key, title: s.title, word: s.word, color: colorHex(s.color) }));
+  return claude.statuses.map((s) => ({ key: s.key, title: s.title, word: s.word, color: colorHex(s.color) }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -301,7 +295,7 @@ function renderTopos(){
     </div>\`).join('');
 }
 function renderSegs(){
-  document.getElementById('agents').innerHTML = [2,3,4,5,6,8].map(n=>
+  document.getElementById('agents').innerHTML = [2,3,4,5,6,7,8].map(n=>
     \`<button data-n="\${n}" class="\${SEL.agents===n?'on':''}">\${n}</button>\`).join('');
   document.getElementById('perm').innerHTML = CONFIG.permissionModes.map(m=>{
     const danger = m==='bypassPermissions';
@@ -342,7 +336,11 @@ function preview(){
       if (!j.ok) { document.getElementById('crew').innerHTML='<span class="chip">'+esc(j.error)+'</span>'; document.getElementById('warn').textContent=''; return; }
       document.getElementById('crew').innerHTML = j.plan.agents.map(a=>'<span class="chip'+(a.initiator?' swarm':'')+'" title="'+esc(a.role)+'">'+esc(a.window)+'</span>').join('');
       document.getElementById('warn').textContent = (j.plan.warnings||[]).join(' · ');
-    } catch(e){}
+    } catch(e){
+      // A swallowed failure here left a STALE crew preview that no longer matches the form.
+      document.getElementById('crew').innerHTML = '<span class="chip" style="color:var(--recent);border-color:rgba(245,177,63,.5)">preview unavailable — is the server still running?</span>';
+      document.getElementById('warn').textContent = '';
+    }
   }, 250);
 }
 
@@ -411,7 +409,9 @@ document.getElementById('liveswarms').addEventListener('click', async e=>{
   if (!confirm('Stop swarm "'+name+'"?\\n\\nKills every window in it — their live sessions are lost. Cannot be undone.')) return;
   const r = await fetch('/api/stop-swarm',{method:'POST',headers:{'content-type':'application/json','x-conductor':'1'},body:JSON.stringify({swarm:name, confirm:name})});
   const j = await r.json();
-  toast(j.ok ? '✕ stopped "'+name+'" ('+j.stopped.length+' windows)' : 'stop failed: '+(j.error||'?'));
+  toast(j.ok ? '✕ stopped "'+name+'" ('+j.stopped.length+' windows)'
+    : (j.stopped && j.stopped.length ? '⚠ stopped '+j.stopped.length+', failed to kill: '+j.failed.join(', ')
+    : 'stop failed: '+(j.error||'?')));
   loadSwarms();
 });
 ['purpose','name','cwd'].forEach(id=>document.getElementById(id).addEventListener('input', preview));
@@ -471,9 +471,12 @@ let DATA = [];
 let lastHash = '';
 let BCAST = {};
 
+// How long a send-result chip stays on a card: long enough to read across a few 4s polls,
+// short enough that a stale "✅ running" never describes the NEXT turn.
+const BCAST_TTL_MS = 45000;
 function bcastChip(label){
   const b = BCAST[label]; if (!b) return '';
-  if (Date.now() - b.at > 45000) return '';
+  if (Date.now() - b.at > BCAST_TTL_MS) return '';
   const M = {
     started: ['✅ running','#3ecf8e','prompt accepted — turn is running'],
     sent:    ['↵ sent','#3ecf8e','prompt delivered to a ready prompt'],
@@ -599,7 +602,7 @@ async function rekick(label) {
   try {
     const r = await fetch('/api/rekick', { method:'POST', headers:{'content-type':'application/json','x-conductor':'1'}, body:JSON.stringify({label}) });
     const j = await r.json();
-    toast(j.ok ? '🔁 kickoff re-delivered to '+label : 'rekick failed: '+(j.error||'?'));
+    toast(j.ok ? '🔁 re-delivery started (verified, up to 3 attempts)' : 'rekick failed: '+(j.error||'?'));
   } catch(e) { toast('rekick failed'); }
 }
 async function replyAll(text) {
@@ -809,7 +812,7 @@ async function handle(req, res) {
       try {
         const pl = swarm.plan(p);
         sendJSON(res, 200, { ok: true, plan: { ...pl, agents: pl.agents.map((a) => ({ window: a.window, slot: a.slot, role: a.role, initiator: a.initiator })) } });
-      } catch (e) { sendJSON(res, 200, { ok: false, error: e.message }); }
+      } catch (e) { sendJSON(res, 400, { ok: false, error: e.message }); }   // validation error — same contract as /api/fire
     });
     return;
   }
@@ -841,7 +844,10 @@ async function handle(req, res) {
     const minutes = parseInt(url.searchParams.get('minutes'), 10) || 60;
     try {
       const rows = await collectSessions({ minutes, all });
-      const mgd = manage.managedBySession();
+      // ONE registry walk per poll: managedBySession and the lost-card loop below share it,
+      // instead of each re-listing (and re-spawning tmux) per request.
+      const managed = manage.listManaged();
+      const mgd = manage.managedBySession(managed);
       const reportCache = {};   // swarm -> does out/REPORT.md exist (one statSync per swarm, not per row)
       for (const r of rows) {
         const w = mgd[r.sessionId];
@@ -860,7 +866,7 @@ async function handle(req, res) {
       // every registry swarm member that still has no transcript (sessionId never resolved) as a
       // synthetic card after a grace period, with a re-kickoff handle (/api/rekick).
       const LOST_GRACE_MS = 90 * 1000;
-      for (const w of manage.listManaged()) {
+      for (const w of managed) {
         if (!w.swarm || w.sessionId) continue;
         if (Date.now() - (w.created || 0) < LOST_GRACE_MS) continue;
         rows.push({
@@ -897,11 +903,13 @@ async function handle(req, res) {
   if (url.pathname === '/api/rekick' && req.method === 'POST') {
     readBody(req, res, (p) => {
       if (!p.label) return sendJSON(res, 400, { ok: false, error: 'label required' });
-      const w = manage.listManaged().find((x) => x.label === manage.sanitize(p.label));
+      const w = manage.listManaged({ readonly: true }).find((x) => x.label === manage.sanitize(p.label));
       if (!w) return sendJSON(res, 400, { ok: false, error: `no live managed window "${p.label}"` });
       if (!w.kickoff) return sendJSON(res, 400, { ok: false, error: `no kickoff recorded for "${w.label}" — it was not fired by V2` });
       manage.deliverAdopted(w.label, w.kickoff);   // verified delivery: boot→ready walk + resend-on-eaten
-      sendJSON(res, 200, { ok: true, label: w.label });
+      // deliverAdopted is fire-and-forget (it polls the pane for up to ~60s) — report that delivery
+      // STARTED, not that it landed; claiming success here before the walk finishes would lie.
+      sendJSON(res, 200, { ok: true, label: w.label, status: 'delivering' });
     });
     return;
   }
