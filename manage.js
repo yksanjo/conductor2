@@ -144,6 +144,10 @@ function answerTrust(label) { return key(label, 'Enter'); }
 //            ("Resume from summary / full session as-is / don't ask"). Recently-active cards
 //            are exactly these large sessions — the old trust-only handler never answered this
 //            menu, so adopting hung here and the reply was typed into it.
+//   menu   = a turn-time permission menu ("Do you want to run this command? ❯ 1. Yes"). Typed
+//            text lands as a menu SELECTION, not a reply — so this used to fall through to
+//            busy (or worse, ready) and a board reply got eaten by the menu. Detection matches
+//            the eval harness's auto-approver so the two never disagree about what a menu is.
 //   busy   = booting, loading history, or compacting — not safe to type into yet
 //   running= a turn is in progress ("esc to interrupt"). The input box may look empty (Claude lets
 //            you QUEUE a line), but the contract for "ready" is "will accept a reply now", and
@@ -156,6 +160,10 @@ function answerTrust(label) { return key(label, 'Enter'); }
 function classifyPane(s) {
   if (/trust this folder|Yes, I trust|safety check/i.test(s)) return 'trust';
   if (/Resume from summary|Resume full session as-is/i.test(s)) return 'resume';
+  // After trust/resume (both also render a "❯ 1." option list) — a permission menu must win
+  // over running/ready: whatever else the pane shows, typing into it selects a menu item.
+  if (/Do you want to (create|make|edit|run|proceed|allow)/i.test(s)
+      || /❯\s*1\.\s*(Yes|Allow)/i.test(s)) return 'menu';
   if (/Compacting conversation/i.test(s)) return 'busy';
   if (/esc to interrupt/i.test(s)) return 'running';        // a turn is in progress — not ready (BUG-3)
   if (/\? for shortcuts|shift\+tab to cycle|auto mode on/i.test(s)
@@ -173,6 +181,29 @@ function paneStage(label) {
 // adopting a window to continue it wants — the summary default kicks off a slow /compact.
 function resumeFull(label) { key(label, 'Down'); return key(label, 'Enter'); }
 
+// Approve a permission menu: prefer the "allow all / don't ask again" option (usually #2) to cut
+// repeat prompts — the same policy the eval harness's auto-approver always used. Re-checks that a
+// menu is actually showing so a stray board click can't fire Enter into a live prompt.
+function approveMenu(label) {
+  const name = sanitize(label);
+  if (!windowAlive(name)) return { ok: false, error: `no live managed window "${name}"` };
+  const r = tmux(['capture-pane', '-p', '-t', target(name)]);
+  const pane = r.code === 0 ? tailLines(r.out) : '';
+  if (classifyPane(pane) !== 'menu') return { ok: false, error: 'no permission menu showing — nothing approved' };
+  if (/2\.\s*(Yes,?\s*(and\s*)?)?(allow all|don'?t ask|accept all)/i.test(pane)) key(name, 'Down');
+  return key(name, 'Enter');
+}
+
+// Deny a permission menu: Esc backs out and hands the turn back to the agent ("tell Claude what
+// to do differently"). Same no-menu guard as approve.
+function denyMenu(label) {
+  const name = sanitize(label);
+  if (!windowAlive(name)) return { ok: false, error: `no live managed window "${name}"` };
+  const r = tmux(['capture-pane', '-p', '-t', target(name)]);
+  if (r.code !== 0 || classifyPane(tailLines(r.out)) !== 'menu') return { ok: false, error: 'no permission menu showing — nothing denied' };
+  return key(name, 'Escape');
+}
+
 // Settle delay between firing a prompt and reading the pane back to see if the turn started.
 const CONFIRM_MS = 350;
 
@@ -185,15 +216,22 @@ function sendIfReady(label, text) {
   if (!hasTmux()) return { ok: false, label: sanitize(label), status: 'error', error: 'tmux not installed' };
   const name = sanitize(label);
   if (!windowAlive(name)) return { ok: false, label: name, status: 'gone' };
-  const stage = paneStage(name);
-  // Typing into the folder-trust prompt, the resume picker, or a busy/compacting pane is exactly
-  // how a broadcast silently lands in the wrong place — refuse, and report the stage so the cockpit
-  // can flag "⏸ trust prompt" / "busy" on that card instead of claiming success.
-  if (stage !== 'ready') return { ok: false, label: name, status: stage === 'gone' ? 'gone' : 'skipped', stage };
+  // One capture serves both the readiness gate and confirmDelivery's before/after comparison.
+  const cap = tmux(['capture-pane', '-p', '-t', target(name)]);
+  const stage = cap.code !== 0 ? 'gone' : classifyPane(tailLines(cap.out));
+  // Typing into the folder-trust prompt, the resume picker, a permission menu, or a busy/compacting
+  // pane is exactly how a broadcast silently lands in the wrong place — refuse, and report the stage
+  // so the cockpit can flag "⏸ trust prompt" / "busy" on that card instead of claiming success.
+  if (stage !== 'ready') {
+    const rec = { ok: false, label: name, status: stage === 'gone' ? 'gone' : 'skipped', stage };
+    // A menu would eat the text as a SELECTION — say exactly what to do instead.
+    if (stage === 'menu') rec.error = "pane is at a permission menu — approve or deny it, don't type into it";
+    return rec;
+  }
   tmux(['send-keys', '-t', target(name), '-l', '--', String(text)]);
   const r = tmux(['send-keys', '-t', target(name), 'Enter']);
   if (r.code !== 0) return { ok: false, label: name, status: 'error', stage: 'ready', error: r.err };
-  return { ok: true, label: name, status: 'pending', stage: 'ready' };
+  return { ok: true, label: name, status: 'pending', stage: 'ready', pre: cap.out };
 }
 
 // Phase 2: read the pane back and upgrade a 'pending' record to 'started' (the turn is visibly
@@ -203,8 +241,14 @@ function sendIfReady(label, text) {
 // only produced false "unverified" alarms on prompts that were actually accepted.
 function confirmDelivery(rec) {
   if (!rec || rec.status !== 'pending') return rec;
+  const MARKER = /esc to interrupt|Compacting conversation/i;
   const after = tmux(['capture-pane', '-p', '-t', target(rec.label)]);
-  const running = after.code === 0 && /esc to interrupt|Compacting conversation/i.test(after.out);
+  const now = after.code === 0 && MARKER.test(after.out);
+  // The marker can be left over from a PRIOR turn (echoed transcript text on the visible screen),
+  // so presence alone is a false positive: only a TRANSITION — absent in the pre-send capture,
+  // present now — confirms THIS send started a turn. Fall back to presence when pre-capture failed.
+  const was = typeof rec.pre === 'string' ? MARKER.test(rec.pre) : null;
+  const running = now && (was === null || !was);
   return { ...rec, status: running ? 'started' : 'sent' };
 }
 
@@ -401,4 +445,4 @@ function managedBySession() {
   return map;
 }
 
-module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, deliverAdopted, sanitize, windowAlive, tailLines, classifyPane, resolveSession, hasTmux, SESSION, REG_FILE };
+module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, approveMenu, denyMenu, deliverAdopted, sanitize, windowAlive, tailLines, classifyPane, resolveSession, hasTmux, SESSION, REG_FILE };

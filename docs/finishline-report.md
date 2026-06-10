@@ -1,7 +1,7 @@
 # Conductor V2 — Release-Readiness Report
 
 **Swarm:** finishline (pipeline: recon → audit → verify → report) · **Date:** 2026-06-10
-**Scope:** everything shipped in `/Users/yoshikondo/conductor-v2` (github.com/yksanjo/conductor2, npm `@yksanjo/conductor2@2.0.0`, unpublished): code correctness, security of server.js + swarm-say allowlist + CSRF guard, eval-harness honesty, README accuracy vs behavior, `files[]` completeness, npm publish readiness.
+**Scope:** everything shipped in `~/conductor-v2` (github.com/yksanjo/conductor2, npm `@yksanjo/conductor2@2.0.0`, unpublished): code correctness, security of server.js + swarm-say allowlist + CSRF guard, eval-harness honesty, README accuracy vs behavior, `files[]` completeness, npm publish readiness.
 **Method:** recon mapped every entry point; the auditor read every shipped module line-by-line with live probes; the verifier independently reproduced or killed every finding (3 fresh headless-Claude repros, tarball re-inspection, suite re-run). Nothing below is a "maybe" — every finding was independently confirmed.
 
 ## Verdict

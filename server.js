@@ -19,7 +19,7 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const { collectSessions } = require('./lib');
+const { collectSessions, relTime } = require('./lib');
 const manage = require('./manage');
 const swarm = require('./swarm');
 const topologies = require('./topologies');
@@ -477,7 +477,7 @@ function bcastChip(label){
   const M = {
     started: ['✅ running','#3ecf8e','prompt accepted — turn is running'],
     sent:    ['↵ sent','#3ecf8e','prompt delivered to a ready prompt'],
-    skipped: ['⏸ '+(b.stage==='trust'?'trust prompt':b.stage==='resume'?'resume picker':'busy'),'#d9a441','not at a ready prompt — nothing was typed'],
+    skipped: ['⏸ '+(b.stage==='trust'?'trust prompt':b.stage==='resume'?'resume picker':b.stage==='menu'?'permission menu':'busy'),'#d9a441','not at a ready prompt — nothing was typed'],
     gone:    ['✕ gone','var(--dim)','window no longer exists'],
     error:   ['⚠ error','#e5484d','send failed'],
   };
@@ -494,7 +494,7 @@ function recordBcast(results){
 // so a missed message doesn't silently freeze the pipeline; the nudge re-sends a "proceed" prompt.
 const STALL_MS = 4*60*1000;
 function isStalled(s){
-  return s.swarm && s.managed && !s.swarmDone && s.status !== 'active'
+  return s.swarm && s.managed && !s.swarmDone && !s.lost && s.status !== 'active'
     && (Date.now() - (s.lastActiveTs || s.lastActivityTs || 0)) > STALL_MS;
 }
 const NUDGE = 'You appear idle. Check the swarm out/ directory and re-read your briefing: if you are waiting on a handoff message that never arrived, proceed now with the information already on disk; if your work is done, hand off or write your output file.';
@@ -515,7 +515,7 @@ async function load() {
     const j = await r.json();
     DATA = j.sessions;
     if (j.statuses) META = { statuses:j.statuses };
-    const structure = WINDOW + '|' + JSON.stringify(DATA.map(s=>[s.sessionId,s.status,s.managed,s.swarm,isStalled(s)]));
+    const structure = WINDOW + '|' + JSON.stringify(DATA.map(s=>[s.sessionId,s.status,s.managed,s.swarm,isStalled(s),s.stage==='menu']));
     if (structure !== lastHash && !typingNow()) { lastHash = structure; render(); }
     else updateInPlace();
   } catch(e) { /* keep last render */ }
@@ -560,7 +560,7 @@ function cardHTML(s) {
       </div>
       <div class="label">\${esc(s.title || s.label)}</div>
       <div class="task">\${esc(s.lastAction || s.intent || '—')}</div>
-      <div class="cfoot">\${s.managed ? bcastChip(s.mlabel) : ''}\${isStalled(s) ? '<span class="chip stall" title="Idle for a while with no REPORT.md yet — may have missed a handoff">⚠ stalled?</span><button class="qb nudge" data-nudge="'+esc(s.mlabel)+'" title="Re-send a proceed prompt">nudge</button>' : ''}\${s.role ? '<span class="chip swarm" title="swarm role">'+esc(s.role.split('—')[0].trim())+'</span>' : ''}\${s.place ? '<span class="chip">'+esc(s.place)+'</span>' : ''}\${s.gitBranch ? '<span class="chip">'+esc(s.gitBranch)+'</span>' : ''}\${s.managed ? '<button class="bopen" data-open="'+esc(s.mlabel)+'" title="Open this window in Terminal">↗ open</button>' : ''}</div>
+      <div class="cfoot">\${s.managed ? bcastChip(s.mlabel) : ''}\${s.stage==='menu' ? '<span class="chip stall" title="Waiting on a permission prompt — a text reply here would be eaten as a menu selection, so it is refused">⏸ permission menu</span><button class="qb" data-approve="'+esc(s.mlabel)+'" title="Approve — selects Yes (prefers the don&#39;t-ask-again option when offered)">✓ approve</button><button class="qb danger" data-deny="'+esc(s.mlabel)+'" title="Deny — sends Esc; the agent is told to do something different">✗ deny</button>' : ''}\${s.lost ? '<span class="chip stall" title="This swarm window has written no transcript — its launch kickoff may never have landed">⚠ kickoff lost?</span><button class="qb nudge" data-rekick="'+esc(s.mlabel)+'" title="Re-deliver the stored kickoff through verified delivery">re-kickoff</button>' : ''}\${isStalled(s) ? '<span class="chip stall" title="Idle for a while with no REPORT.md yet — may have missed a handoff">⚠ stalled?</span><button class="qb nudge" data-nudge="'+esc(s.mlabel)+'" title="Re-send a proceed prompt">nudge</button>' : ''}\${s.role ? '<span class="chip swarm" title="swarm role">'+esc(s.role.split('—')[0].trim())+'</span>' : ''}\${s.place ? '<span class="chip">'+esc(s.place)+'</span>' : ''}\${s.gitBranch ? '<span class="chip">'+esc(s.gitBranch)+'</span>' : ''}\${s.managed ? '<button class="bopen" data-open="'+esc(s.mlabel)+'" title="Open this window in Terminal">↗ open</button>' : ''}</div>
       \${ctrlHTML(s)}
     </div>\`;
 }
@@ -578,9 +578,29 @@ async function reply(label, text) {
     const j = await r.json();
     recordBcast([{ label: j.label || label, status: j.ok ? (j.status||'sent') : (j.status||'error'), stage: j.stage }]);
     if (j.ok) toast(j.status==='started' ? '✅ '+label+' is running it' : '↵ sent to '+label);
-    else toast(j.status==='skipped' ? '⏸ '+label+' not ready ('+(j.stage||'busy')+') — nothing typed' : 'send failed: '+(j.error||j.status||'?'));
+    else toast(j.status==='skipped' ? '⏸ '+label+': '+(j.error || 'not ready ('+(j.stage||'busy')+') — nothing typed') : 'send failed: '+(j.error||j.status||'?'));
     render();
   } catch(e) { toast('send failed'); }
+}
+// Answer a permission menu from the board. Approve selects "Yes" (the server prefers the
+// "don't ask again" option when the menu offers it); deny sends Esc. Both are refused
+// server-side if the menu is no longer showing, so a stale click can't hit a live turn.
+async function menuAct(label, action) {
+  try {
+    const r = await fetch('/api/say', { method:'POST', headers:{'content-type':'application/json','x-conductor':'1'}, body:JSON.stringify({label, menu:action}) });
+    const j = await r.json();
+    toast(j.ok ? (action==='approve' ? '✓ approved · ' : '✗ denied · ')+label : 'failed: '+(j.error||'?'));
+    lastHash=''; load();
+  } catch(e) { toast('failed'); }
+}
+// Re-deliver a lost kickoff (a swarm window that never wrote a transcript).
+async function rekick(label) {
+  toast('re-delivering kickoff to '+label+'…');
+  try {
+    const r = await fetch('/api/rekick', { method:'POST', headers:{'content-type':'application/json','x-conductor':'1'}, body:JSON.stringify({label}) });
+    const j = await r.json();
+    toast(j.ok ? '🔁 kickoff re-delivered to '+label : 'rekick failed: '+(j.error||'?'));
+  } catch(e) { toast('rekick failed'); }
 }
 async function replyAll(text) {
   if (!text || !text.trim()) return;
@@ -681,7 +701,13 @@ function dispatchReply(el, text) {
   else if (el.dataset.session != null) replyAdopt(el.dataset.session, text);
 }
 boardEl.addEventListener('click', e=>{
-  const nb = e.target.closest('.nudge');
+  const ap = e.target.closest('[data-approve]');
+  if (ap) { e.stopPropagation(); menuAct(ap.dataset.approve, 'approve'); return; }
+  const dn = e.target.closest('[data-deny]');
+  if (dn) { e.stopPropagation(); menuAct(dn.dataset.deny, 'deny'); return; }
+  const rk = e.target.closest('[data-rekick]');
+  if (rk) { e.stopPropagation(); rekick(rk.dataset.rekick); return; }
+  const nb = e.target.closest('[data-nudge]');
   if (nb) { e.stopPropagation(); reply(nb.dataset.nudge, NUDGE); return; }
   const ob = e.target.closest('.bopen');
   if (ob) { e.stopPropagation(); openTerm(ob.dataset.open); return; }
@@ -821,10 +847,28 @@ async function handle(req, res) {
         const w = mgd[r.sessionId];
         if (!w) continue;
         r.managed = true; r.mlabel = w.label; r.swarm = w.swarm || null; r.role = w.role || null;
+        // Pane stage rides along so the board can act on a permission menu (approve/deny) instead
+        // of a text reply being eaten as a menu selection.
+        r.stage = manage.paneStage(w.label);
         if (w.swarm) {
           if (!(w.swarm in reportCache)) reportCache[w.swarm] = fs.existsSync(path.join(swarm.SWARMS_DIR, w.swarm, 'out', 'REPORT.md'));
           r.swarmDone = reportCache[w.swarm];   // final deliverable landed → swarm is finished, not stalled
         }
+      }
+      // Board rows come from transcripts — but an agent whose KICKOFF never landed writes no
+      // transcript at all, so it has no card and the stalled detector can never see it. Render
+      // every registry swarm member that still has no transcript (sessionId never resolved) as a
+      // synthetic card after a grace period, with a re-kickoff handle (/api/rekick).
+      const LOST_GRACE_MS = 90 * 1000;
+      for (const w of manage.listManaged()) {
+        if (!w.swarm || w.sessionId) continue;
+        if (Date.now() - (w.created || 0) < LOST_GRACE_MS) continue;
+        rows.push({
+          sessionId: 'lost-' + w.label, shortId: 'lost-' + w.label, label: w.label, title: w.label,
+          status: 'recent', managed: true, mlabel: w.label, swarm: w.swarm, role: w.role || null,
+          lost: true, lastAction: 'no transcript yet — kickoff may be lost',
+          lastActiveTs: w.created || 0, lastActiveRel: relTime(w.created || 0),
+        });
       }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify({ generatedAt: new Date().toISOString(), statuses: statusMeta(), count: rows.length, sessions: rows }));
@@ -836,8 +880,28 @@ async function handle(req, res) {
 
   if (url.pathname === '/api/say' && req.method === 'POST') {
     readBody(req, res, (p) => {
-      const r = p.key ? manage.key(p.label, p.key) : manage.deliver(p.label, p.text || '');
+      // menu:'approve'|'deny' answers a permission menu (guarded in manage — refuses when no menu
+      // is showing, so a stale board click can't fire a stray keystroke into a live turn).
+      const r = p.menu === 'approve' ? manage.approveMenu(p.label)
+        : p.menu === 'deny' ? manage.denyMenu(p.label)
+        : p.key ? manage.key(p.label, p.key)
+        : manage.deliver(p.label, p.text || '');
       sendJSON(res, r.ok ? 200 : 400, r);
+    });
+    return;
+  }
+
+  // Re-deliver a persisted swarm kickoff to a window whose first one was lost (no transcript ever
+  // appeared). Not destructive — it re-sends a prompt through the verified-delivery path — but
+  // it's a mutating POST, so it sits behind the same CSRF guard as everything else.
+  if (url.pathname === '/api/rekick' && req.method === 'POST') {
+    readBody(req, res, (p) => {
+      if (!p.label) return sendJSON(res, 400, { ok: false, error: 'label required' });
+      const w = manage.listManaged().find((x) => x.label === manage.sanitize(p.label));
+      if (!w) return sendJSON(res, 400, { ok: false, error: `no live managed window "${p.label}"` });
+      if (!w.kickoff) return sendJSON(res, 400, { ok: false, error: `no kickoff recorded for "${w.label}" — it was not fired by V2` });
+      manage.deliverAdopted(w.label, w.kickoff);   // verified delivery: boot→ready walk + resend-on-eaten
+      sendJSON(res, 200, { ok: true, label: w.label });
     });
     return;
   }

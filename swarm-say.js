@@ -7,8 +7,8 @@
 //      is refused. An agent can't cross-talk into another swarm or your personal session, even if
 //      its prompt tells it to.
 //   2. Readiness gate: delivery routes through manage.deliver(), which refuses to type into a
-//      trust prompt, a resume picker, or a busy/running pane — so a handoff can't silently land
-//      inside a permission dialog (dogfood findings #4 + #5).
+//      trust prompt, a resume picker, a permission menu, or a busy/running pane — so a handoff
+//      can't silently land inside a permission dialog (dogfood findings #4 + #5).
 //
 //   swarm-say <swarm> <window> <message...>
 //
