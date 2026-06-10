@@ -144,7 +144,8 @@ function fire(config, opts = {}) {
       cmd: opts.cmd, // test seam — defaults to 'claude' inside manage.run
       meta: { swarm: p.swarm, role: a.role, slot: a.slot, topology: p.topology },
     });
-    results.push({ window: a.window, role: a.role, ...r });
+    // kickoff travels in the result so harnesses/watchdogs can re-deliver it to a stalled window.
+    results.push({ window: a.window, role: a.role, kickoff: a.kickoff, initiator: !!a.initiator, ...r });
     if (r.ok && opts.kickoff !== false) manage.deliverAdopted(a.window, a.kickoff);
   }
 

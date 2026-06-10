@@ -293,11 +293,20 @@ function attachCommand(label) {
 // Non-blocking: drive a freshly launched/adopted window from boot to "ready", accepting each
 // startup menu along the way (folder-trust AND the resume picker that large, recently-active
 // forks show), then deliver the reply once the prompt box is actually up. Polls up to ~60s
-// (forks load a lot of history) and delivers the text exactly once. Shared by the web cockpit
-// and the MCP control tools so both drive adopted windows identically.
+// (forks load a lot of history). Shared by the web cockpit and the MCP control tools so both
+// drive adopted windows identically.
+//
+// KICKOFF-RETRY: the old version said the text once and stopped — but Claude's TUI has a startup
+// race where the very first "ready" render can still drop keystrokes (input handler not bound
+// yet), so a swarm kickoff could vanish and the agent sat idle forever (eval run with 0/N baton
+// lines). Now delivery is VERIFIED: after sending, keep polling — seeing the turn run (running/
+// busy) confirms it took; seeing 'ready' again means the line was eaten, so flush any text
+// stranded in the input box (bare Enter, a no-op on an empty box) and, if still idle, resend.
+// Capped at 3 sends. A turn that completes within the ~1.2s verify window would look like a lost
+// send, but no real turn (model roundtrip + file reads) finishes that fast.
 function deliverAdopted(label, text) {
   const deadline = Date.now() + 60000;
-  let delivered = false, resumeAnswered = false;
+  let resumeAnswered = false, attempts = 0, flushed = false;
   (function tick() {
     if (Date.now() > deadline) return;
     try {
@@ -308,11 +317,19 @@ function deliverAdopted(label, text) {
         if (!resumeAnswered) { resumeAnswered = true; resumeFull(label); }
         return setTimeout(tick, 1000);
       }
-      if (stage === 'ready') {
-        if (text && text.trim() && !delivered) { delivered = true; say(label, text); }
-        return;                                       // done
+      if (stage === 'running' || stage === 'busy') {
+        if (attempts > 0) return;                     // delivered and the turn visibly took — done
+        return setTimeout(tick, 700);                 // still booting before first delivery
       }
-      return setTimeout(tick, 700);                   // busy / still loading
+      // stage === 'ready'
+      if (!text || !text.trim()) return;
+      if (attempts === 0) { attempts = 1; say(label, text); return setTimeout(tick, 1200); }
+      // A send didn't start a turn. First flush (the text may be sitting in the box with a lost
+      // Enter — submitting it is the fix, and Enter on an empty box is harmless), then resend.
+      if (!flushed) { flushed = true; key(label, 'Enter'); return setTimeout(tick, 1200); }
+      if (attempts >= 3) return;                      // give up — callers' watchdogs take over
+      attempts++; flushed = false; say(label, text);
+      return setTimeout(tick, 1200);
     } catch { /* ignore */ }
   })();
 }

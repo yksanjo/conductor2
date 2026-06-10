@@ -105,23 +105,55 @@ function batonLines(dir) {
   catch { return 0; }
 }
 
-// Fire a config, then auto-approve + poll until REPORT.md exists or timeout. Returns metrics.
+// Kickoff watchdog: if NOTHING has happened after this long (zero baton lines) and the chain's
+// initiator is sitting idle at a ready prompt, its kickoff line was lost in the TUI startup race
+// (see KICKOFF-RETRY in manage.js) — re-deliver it. This re-drives LAUNCH machinery only; lost
+// mid-chain handoffs are the thing under test and are never re-driven by the harness.
+const KICKOFF_WATCHDOG_MS = 45000;
+const KICKOFF_RETRY_GAP_MS = 20000;
+const MAX_REKICKS = 2;
+
+// Fire a config, then auto-approve + poll until REPORT.md exists or timeout. Per poll, every
+// member window's pane stage is sampled; transitions are written to evals/logs/<name>.log so a
+// failed run is attributable (which window stalled, at what stage, when). Returns metrics.
 async function oneRun({ name, topology, agents, model, timeout, purpose }) {
   const started = Date.now();
   const fired = swarm.fire({ name, topology, agents, model, purpose, cwd: process.cwd(), permissionMode: 'acceptEdits' });
-  if (!fired.ok) return { name, ok: false, error: fired.error, ms: 0, handoffs: 0, expected: agents };
+  if (!fired.ok) return { name, ok: false, error: fired.error, ms: 0, handoffs: 0, expected: agents, rekicks: 0 };
   const dir = fired.dir;
+  const initiators = fired.agents.filter((a) => a.initiator);
   const deadlineMs = started + timeout * 1000;
-  let completed = false;
+  const log = [];
+  const lastStage = {};
+  const note = (line) => log.push(`${((Date.now() - started) / 1000).toFixed(1)}s ${line}`);
+  let completed = false, rekicks = 0, lastKickMs = started;
   while (Date.now() < deadlineMs) {
     driveApprovals(name);
+    for (const w of manage.listManaged().filter((x) => x.swarm === name)) {
+      const stage = manage.paneStage(w.label);
+      if (stage !== lastStage[w.label]) { note(`${w.label} → ${stage}`); lastStage[w.label] = stage; }
+    }
+    const baton = batonLines(dir);
+    if (baton === 0 && rekicks < MAX_REKICKS
+        && Date.now() - lastKickMs > (rekicks ? KICKOFF_RETRY_GAP_MS : KICKOFF_WATCHDOG_MS)) {
+      for (const a of initiators) {
+        if (lastStage[a.window] !== 'ready') continue;   // only an IDLE initiator means a lost kickoff
+        const r = manage.deliver(a.window, a.kickoff);
+        note(`KICKOFF-RETRY ${a.window} → ${r.status}`);
+      }
+      rekicks++; lastKickMs = Date.now();
+    }
     if (fs.existsSync(reportPath(dir))) { completed = true; break; }
     await sleep(2500);
   }
   const ms = Date.now() - started;
   const handoffs = batonLines(dir);
+  note(`end: ${completed ? 'completed' : 'timeout'} · baton ${handoffs}/${agents}`);
   swarm.stopSwarm(name);
-  return { name, ok: completed, ms, handoffs, expected: agents };
+  const logDir = path.join(__dirname, 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  fs.writeFileSync(path.join(logDir, `${name}.log`), log.join('\n') + '\n');
+  return { name, ok: completed, ms, handoffs, expected: agents, rekicks };
 }
 
 function median(xs) { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
@@ -138,7 +170,8 @@ async function main() {
     process.stdout.write(`  run ${i + 1}/${a.runs} (${name})… `);
     const r = await oneRun({ name, topology: a.topology, agents: a.agents, model: a.model, timeout: a.timeout, purpose: RELAY_PURPOSE });
     runs.push(r);
-    console.log(r.ok ? `✓ ${fmt(r.ms)} · ${r.handoffs}/${r.expected} relayed` : `✗ ${r.error || 'no REPORT.md in time'} (${r.handoffs}/${r.expected})`);
+    console.log((r.ok ? `✓ ${fmt(r.ms)} · ${r.handoffs}/${r.expected} relayed` : `✗ ${r.error || 'no REPORT.md in time'} (${r.handoffs}/${r.expected})`)
+      + (r.rekicks ? ` · ${r.rekicks} kickoff retr${r.rekicks === 1 ? 'y' : 'ies'}` : ''));
     await sleep(1500);
   }
 
@@ -177,13 +210,17 @@ ${baseline ? `| single-agent baseline (same deliverable) | ${baseline.ok ? fmt(b
 
 ### Per run
 
-| run | result | wall-clock | relayed |
-|---|---|---|---|
-${runs.map((r, i) => `| ${i + 1} | ${r.ok ? '✓ completed' : '✗ ' + (r.error || 'timeout')} | ${fmt(r.ms)} | ${r.handoffs}/${r.expected} |`).join('\n')}
+| run | result | wall-clock | relayed | kickoff retries |
+|---|---|---|---|---|
+${runs.map((r, i) => `| ${i + 1} | ${r.ok ? '✓ completed' : '✗ ' + (r.error || 'timeout')} | ${fmt(r.ms)} | ${r.handoffs}/${r.expected} | ${r.rekicks || 0} |`).join('\n')}
 
 > Auto-approved unattended (the board's supervised path, automated): trust prompts, resume pickers,
 > and permission menus are accepted by the harness. \`acceptEdits\` auto-accepts file writes; the one
 > Bash prompt per agent (swarm-say) is approved with "don't ask again".
+>
+> Per-run pane-stage transition logs are written to \`evals/logs/<run>.log\` so failures are
+> attributable. "Kickoff retries" counts harness re-deliveries of a LOST launch kickoff (zero baton
+> lines + idle initiator) — launch machinery, not the handoff chain under test, which is never re-driven.
 `;
   fs.mkdirSync(path.join(__dirname), { recursive: true });
   fs.writeFileSync(path.join(__dirname, 'RESULTS.md'), md);
