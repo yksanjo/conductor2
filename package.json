@@ -8,7 +8,7 @@
   "bin": {
     "conductor2": "cli.js"
   },
-  "main": "swarm.js",
+  "main": "lib.js",
   "scripts": {
     "start": "node cli.js up",
     "serve": "node server.js",
@@ -31,6 +31,7 @@
     "evals/coordination.mjs",
     "evals/RESULTS.md",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {

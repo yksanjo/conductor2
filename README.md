@@ -14,8 +14,8 @@ git clone https://github.com/yksanjo/conductor2 && cd conductor2 && npm link
 conductor2 up                          # launch pad → http://localhost:7592
 ```
 
-Requires Node ≥18 and `tmux`. Not on npm yet. Zero install-time dependencies — `npm link` just
-puts the `conductor2` bin on your PATH.
+Requires Node ≥18, `tmux`, and the `claude` CLI. Not on npm yet. Zero install-time dependencies —
+`npm link` just puts the `conductor2` bin on your PATH.
 
 ## Why this is the hard part
 
@@ -24,10 +24,10 @@ terminal** — macOS removed `TIOCSTI`, the syscall that used to allow it. So "t
 isn't a function call; it's a control problem. Conductor solves it the way it actually has to be
 solved: every managed agent runs inside a **tmux** session, and the only reliable channel in or out
 is `tmux send-keys`. On top of that raw channel sits a small state machine — `paneStage()` in
-[`manage.js`](manage.js) classifies each window as `trust` / `resume` / `busy` / `ready` / `gone`, so
-a prompt is never typed into a folder-trust dialog or a loading screen and silently lost. "Send a
-message to an agent" is really "drive it from boot to ready, then deliver exactly once." That, not
-the UI, is the engineering.
+[`manage.js`](manage.js) classifies each window as `trust` / `resume` / `menu` / `busy` / `running` /
+`ready` / `gone`, so a prompt is never typed into a folder-trust dialog, a permission menu, or a
+loading screen and silently lost. "Send a message to an agent" is really "drive it from boot to
+ready, then deliver exactly once." That, not the UI, is the engineering.
 
 ## The launch pad
 
@@ -76,9 +76,11 @@ of truth; messages are best-effort nudges, with the board as the backstop** when
 
 Launch order is dependency-aware (receivers before initiators), each window is walked through
 Claude's startup prompts automatically, and the kickoff is a single line pointing at the agent's
-briefing file — long prompts never travel through tmux. If a message is ever missed, the board's
-**stalled-handoff detector** flags the idle agent with a one-click re-nudge — best-effort messages,
-with supervision as the backstop.
+briefing file — long prompts never travel through tmux. Two backstops when a message doesn't land:
+the board's **stalled-handoff detector** flags an agent that went quiet mid-mission (transcript-based)
+with a one-click re-nudge, and a window whose *kickoff* itself was lost — which writes no transcript
+at all, so no normal card can exist — surfaces after 90s as a **"kickoff lost?"** card with a
+one-click re-kickoff that re-delivers the stored kickoff through the verified-delivery path.
 
 ## Design stance (the honest seams, stated plainly)
 
@@ -88,8 +90,11 @@ with supervision as the backstop.
   the control surface: when an agent drifts, you see it and nudge it with one reply. Supervision is a
   feature, not a missing guarantee.
 - **Permission mode is an explicit safety dial.** Default `acceptEdits` still surfaces Bash prompts
-  (including `swarm-say`) so you stay in the loop; answer them from the board. `bypassPermissions`
-  exists for trusted, unattended runs and is loudly labeled — full autonomy, full trust.
+  (including `swarm-say`) so you stay in the loop. The board flags a window sitting at a permission
+  menu and gives you one-click **✓ approve / ✗ deny** buttons (approve selects "Yes", preferring the
+  "don't ask again" option when offered; deny sends Esc) — free-text replies to a menu are refused,
+  because the menu would eat them as a selection. `bypassPermissions` exists for trusted, unattended
+  runs and is loudly labeled — full autonomy, full trust.
 - **Agent boundaries are enforced mechanically, not just by prompt.** Each swarm gets its **own**
   `swarm-say` with its member windows baked in as an allowlist — messaging a window outside the swarm
   is refused before a keystroke is sent, so a confused (or injected) agent can't cross-talk into
@@ -149,6 +154,15 @@ per-swarm allowlist**; the **stalled-handoff detector**; and the **eval harness*
 answers its #1 critique ("no quantified reliability") with real numbers. The tool finding — and
 then surviving, and being improved by — its own review is the demo.
 
+## Relationship to V1
+
+V2 is self-contained — it bundles its own watcher (the `/board` cockpit is
+[V1](https://github.com/yksanjo/conductor)'s board re-skinned), so you don't need V1 installed.
+The two are isolated by design: V1 uses tmux session `conductor` + `~/.conductor/managed.json`,
+V2 uses `conductor2` + `~/.conductor2/managed.json` — a V2 swarm is invisible to a running V1
+cockpit, and vice versa. V2 is the superset for fleets you fire; V1 remains the watcher for
+windows you opened by hand.
+
 ## Surfaces
 
 - `conductor2 up` — launch pad (`/`) + cockpit board (`/board`) on `:7592`
@@ -159,7 +173,7 @@ then surviving, and being improved by — its own review is the demo.
 ## Testing
 
 ```
-npm test     # 68 assertions, zero mocks
+npm test     # 90 assertions, zero mocks
 ```
 
 Real modules against a sandboxed `$HOME`, real `node:http` against the actual request handler, real

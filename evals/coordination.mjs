@@ -72,20 +72,9 @@ function tmuxCaptureTail(label) {
   } catch { return ''; }
 }
 
-// Is the pane sitting on a permission menu we should approve? (trust/resume are handled by stage.)
-function isPermissionMenu(pane) {
-  return /Do you want to (create|make|edit|run|proceed|allow)/i.test(pane) || /❯\s*1\.\s*(Yes|Allow)/i.test(pane);
-}
-// Approve a menu: prefer the "allow all / don't ask again" option (usually #2) to cut repeat prompts.
-function approveMenu(label, pane) {
-  if (/2\.\s*(Yes,?\s*(and\s*)?)?(allow all|don'?t ask|accept all)/i.test(pane)) {
-    manage.key(label, 'Down'); manage.key(label, 'Enter');
-  } else {
-    manage.key(label, 'Enter');
-  }
-}
-
 // One pass of the auto-approver over every live window of a swarm. Returns how many it acted on.
+// Menu detection + approval now live in manage.js (classifyPane's 'menu' stage + approveMenu — the
+// same logic the board's approve button uses), so the harness and the product can't drift.
 function driveApprovals(swarmName) {
   let acted = 0;
   for (const w of manage.listManaged().filter((x) => x.swarm === swarmName)) {
@@ -94,7 +83,7 @@ function driveApprovals(swarmName) {
     const stage = manage.classifyPane(pane);
     if (stage === 'trust') { manage.key(w.label, 'Enter'); acted++; }
     else if (stage === 'resume') { manage.key(w.label, 'Down'); manage.key(w.label, 'Enter'); acted++; }
-    else if (isPermissionMenu(pane)) { approveMenu(w.label, pane); acted++; }
+    else if (stage === 'menu') { manage.approveMenu(w.label); acted++; }
   }
   return acted;
 }

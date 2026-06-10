@@ -8,11 +8,15 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # engines says >=18 — test the floor and current, not just one middle version.
+        node-version: ['18', '22']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
       # tmux is needed for the fire/stop integration tests; without it those tests self-skip,
       # but installing it keeps the full suite (including the live tmux path) exercised in CI.
       - run: sudo apt-get update && sudo apt-get install -y tmux
