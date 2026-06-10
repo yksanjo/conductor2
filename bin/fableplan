@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+#
+# fableplan — plan on Fable 5, execute on Opus 4.8.
+#
+# Claude Code's `opusplan` mode uses the "opus" model slot while in plan mode
+# and the "sonnet" slot for everything else. We don't actually want Opus and
+# Sonnet, though — we want Fable 5 doing the planning and Opus 4.8 doing the
+# work. So we hijack the two model slots with the ANTHROPIC_DEFAULT_*_MODEL
+# env vars and let `--model opusplan` route between them:
+#
+#     plan mode   -> opus slot   -> $FABLEPLAN_PLAN_MODEL  (default claude-fable-5)
+#     exec mode   -> sonnet slot -> $FABLEPLAN_EXEC_MODEL  (default claude-opus-4-8)
+#
+# Override either slot from the environment, e.g.:
+#     FABLEPLAN_PLAN_MODEL=claude-opus-4-8 fableplan
+#     FABLEPLAN_EXEC_MODEL=claude-sonnet-4-6 fableplan
+#
+set -euo pipefail
+
+PLAN_MODEL="${FABLEPLAN_PLAN_MODEL:-claude-fable-5}"
+EXEC_MODEL="${FABLEPLAN_EXEC_MODEL:-claude-opus-4-8}"
+
+exec env \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="$PLAN_MODEL" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="$EXEC_MODEL" \
+  claude --model opusplan "$@"
