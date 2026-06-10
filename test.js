@@ -219,6 +219,43 @@ console.log('\nregressions (dogfood findings)');
   ok(manage.resolveSession(oddReg, new Set()) === 'odd1', "F1: cwd with '.', '_', and space still resolves its transcript (was: silently lost)");
 }
 
+// --- delivery state machine + registry recovery (unit, no tmux) --------------------------------
+console.log('\ndelivery + registry');
+{
+  // confirmDelivery's transition core (deliveryStatus): only a marker TRANSITION — absent in the
+  // pre-send capture, present after — confirms the send started a turn. A marker present in BOTH
+  // is a leftover from a prior turn, not a fresh start.
+  const D = manage.deliveryStatus;
+  ok(D('❯ idle prompt, no marker', 'working… esc to interrupt') === 'started', 'deliveryStatus: marker appears after send → started');
+  ok(D('old turn… esc to interrupt', 'still… esc to interrupt') === 'sent', 'deliveryStatus: marker in BOTH pre and post → not a fresh start, falls back to sent');
+  ok(D(null, 'working… esc to interrupt') === 'started', 'deliveryStatus: pre-capture failed → presence alone counts (fallback)');
+  ok(D('❯ idle', '❯ still idle') === 'sent', 'deliveryStatus: no marker after send → sent (fast turn may already be done)');
+  ok(D('❯ idle', 'Compacting conversation…') === 'started', 'deliveryStatus: compaction counts as the turn running');
+
+  // M5a: empty/whitespace text must be refused — a bare Enter SUBMITS whatever sits in the box.
+  const empty = manage.sendIfReady('whatever', '   ');
+  ok(!empty.ok && /empty/.test(empty.error), 'sendIfReady refuses empty/whitespace text');
+  ok(!manage.sendIfReady('whatever', '').ok, 'sendIfReady refuses zero-length text');
+
+  // M5: the launch line is typed into a shell — non-flag args are quoted, flags pass through.
+  ok(manage.shellQuote('--model') === '--model' && manage.shellQuote('-p') === '-p', 'shellQuote leaves flags bare');
+  ok(manage.shellQuote('/a dir/with space') === "'/a dir/with space'", 'shellQuote wraps paths with spaces');
+  ok(manage.shellQuote("it's") === "'it'\\''s'", "shellQuote splices embedded single quotes");
+
+  // H2: a corrupt registry (torn write) must be backed up and reported, never silently reset.
+  fs.mkdirSync(path.dirname(manage.REG_FILE), { recursive: true });
+  const hadReg = fs.existsSync(manage.REG_FILE) ? fs.readFileSync(manage.REG_FILE, 'utf8') : null;
+  fs.writeFileSync(manage.REG_FILE, '{"windows": {"tor');   // torn mid-write
+  const recovered = manage.loadReg();
+  ok(recovered && typeof recovered.windows === 'object' && !Object.keys(recovered.windows).length, 'H2: corrupt registry → loadReg returns an empty registry');
+  const backup = manage.REG_FILE + '.corrupt-' + process.pid;
+  ok(fs.existsSync(backup) && fs.readFileSync(backup, 'utf8').includes('"tor'), 'H2: the corrupt file is preserved as a .corrupt backup');
+  ok(manage.listManaged({ readonly: true }).length === 0, 'H2: listManaged survives a corrupt registry');
+  fs.rmSync(backup, { force: true });
+  if (hadReg === null) fs.rmSync(manage.REG_FILE, { force: true });
+  else fs.writeFileSync(manage.REG_FILE, hadReg);
+}
+
 // --- fire + registry (integration, needs tmux) -------------------------------------------------
 console.log('\nfire (tmux integration)');
 if (!manage.hasTmux()) {
@@ -240,6 +277,7 @@ if (!manage.hasTmux()) {
   ok(!!member && typeof member.kickoff === 'string' && member.kickoff.includes(member.label), 'H2: fire persists each window\'s kickoff in the registry');
   const stop = swarm.stopSwarm(name);
   ok(stop.ok && stop.stopped.length === 2, 'stopSwarm kills both windows');
+  ok(Array.isArray(stop.failed) && stop.failed.length === 0, 'M2: stopSwarm reports failed kills separately (none here)');
   ok(!swarm.listSwarms().find((s) => s.swarm === name), 'stopped swarm leaves the registry');
 
   // D3: `claude` (or the test seam's cmd) must resolve on PATH before any window is created.

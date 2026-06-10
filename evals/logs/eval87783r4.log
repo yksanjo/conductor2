@@ -1,0 +1,10 @@
+0.3s eval87783r4-s2 → busy
+0.3s eval87783r4-s3 → busy
+0.3s eval87783r4-s1 → busy
+3.0s eval87783r4-s2 → ready
+3.0s eval87783r4-s3 → ready
+3.0s eval87783r4-s1 → ready
+5.6s eval87783r4-s2 → running
+5.6s eval87783r4-s3 → running
+5.6s eval87783r4-s1 → running
+28.9s end: completed · baton 3/3

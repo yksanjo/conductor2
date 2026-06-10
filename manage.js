@@ -28,13 +28,33 @@ function sanitize(label) {
 }
 function target(label) { return `${SESSION}:${sanitize(label)}`; }
 
+// The registry is read and written from several processes (the server's poll, the CLI, every
+// swarm-say invocation), so a torn half-written file is a real possibility — and silently
+// resetting to {} on a parse failure would erase every managed window without a trace.
 function loadReg() {
-  try { return JSON.parse(fs.readFileSync(REG_FILE, 'utf8')); } catch { return { windows: {} }; }
+  let raw;
+  try { raw = fs.readFileSync(REG_FILE, 'utf8'); } catch { return { windows: {} }; } // no file yet — normal
+  try { return JSON.parse(raw); }
+  catch (e) {
+    // Corrupt (likely a torn write): preserve the evidence and say so loudly — never reset silently.
+    const backup = REG_FILE + '.corrupt-' + process.pid;
+    try { fs.copyFileSync(REG_FILE, backup); } catch { /* best effort */ }
+    console.error(`conductor2: registry ${REG_FILE} is corrupt (${e.message}) — backed up to ${backup}, starting from an empty registry`);
+    return { windows: {} };
+  }
 }
 function saveReg(reg) {
   fs.mkdirSync(path.dirname(REG_FILE), { recursive: true });
-  fs.writeFileSync(REG_FILE, JSON.stringify(reg, null, 2));
+  // Write-temp-then-rename so a concurrent reader can never see a half-written file (rename is
+  // atomic within a directory). Same-dir temp keeps the rename on one filesystem.
+  const tmp = REG_FILE + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
+  fs.renameSync(tmp, REG_FILE);
 }
+
+// Synchronous wait without spawning a process — Atomics.wait blocks the thread for ms, replacing
+// the spawnSync('sleep') that forked a process per settle (one per /api/say, per poll iteration).
+function msleep(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 
 // Claude Code names a transcript dir by replacing EVERY non-alphanumeric code unit of the cwd
 // with '-' (runs not collapsed) — not just slashes. A '/'-only transform silently loses any swarm
@@ -43,6 +63,16 @@ function folderFor(cwd) { return path.join(PROJECTS_DIR, cwd.replace(/[^A-Za-z0-
 function jsonlSet(cwd) {
   try { return new Set(fs.readdirSync(folderFor(cwd)).filter((f) => f.endsWith('.jsonl'))); }
   catch { return new Set(); }
+}
+
+// Single-quote an argument for the shell line typed into a pane. Flags (-x/--xyz) are left bare —
+// they're our own literals; everything else (paths, model ids) gets wrapped so spaces and
+// metachars survive. Embedded single quotes use the standard '\'' splice. Newlines can't be
+// quoted into a send-keys line at all — plan() refuses those paths up front.
+function shellQuote(arg) {
+  const s = String(arg);
+  if (/^--?[A-Za-z0-9][A-Za-z0-9-]*$/.test(s)) return s;
+  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
 function sessionExists() { return tmux(['has-session', '-t', SESSION]).code === 0; }
@@ -72,8 +102,10 @@ function run(label, claudeArgs, cwd, opts = {}) {
   }
 
   // Start the program inside the pane (typed into the shell so it stays visible). opts.cmd
-  // defaults to "claude" — overridable for tests / launching other CLIs.
-  const cmd = [opts.cmd || 'claude', ...(claudeArgs || [])].join(' ');
+  // defaults to "claude" — overridable for tests / launching other CLIs. The joined line is
+  // typed into a SHELL, so every non-flag arg (paths like --add-dir <dir> can carry spaces or
+  // metachars) is single-quote-escaped; flags pass through untouched.
+  const cmd = [opts.cmd || 'claude', ...(claudeArgs || []).map(shellQuote)].join(' ');
   tmux(['send-keys', '-t', target(name), '-l', '--', cmd]);
   tmux(['send-keys', '-t', target(name), 'Enter']);
 
@@ -87,7 +119,7 @@ function run(label, claudeArgs, cwd, opts = {}) {
       if (trustPromptShowing(name)) answerTrust(name);
       const fresh = [...jsonlSet(cwd)].filter((f) => !before.has(f));
       if (fresh.length) { sessionId = fresh[0].replace(/\.jsonl$/, ''); break; }
-      spawnSync('sleep', ['0.5']);
+      msleep(500);
     }
   }
 
@@ -117,7 +149,7 @@ function adopt(label, sessionId, cwd, opts) {
 // it's free or already this session's; otherwise suffixes the short session id.
 function uniqueLabel(base, sessionId) {
   const want = sanitize(base);
-  const clash = listManaged().find(
+  const clash = listManaged({ readonly: true }).find(
     (w) => w.label === want && w.sessionId !== sessionId && w.adoptedFrom !== sessionId,
   );
   return clash ? sanitize(want + '-' + String(sessionId || '').slice(0, 8)) : want;
@@ -213,6 +245,9 @@ const CONFIRM_MS = 350;
 // sayAll fire every window first and settle ONCE — instead of paying the confirm delay per window,
 // which froze the single-threaded server for ~CONFIRM_MS × (window count) on every broadcast.
 function sendIfReady(label, text) {
+  // Empty/whitespace text would deliver as a bare Enter — which SUBMITS whatever is sitting in
+  // the input box — and then report 'sent'. Refuse it, like deliverAdopted does.
+  if (!text || !String(text).trim()) return { ok: false, label: sanitize(label), status: 'error', error: 'refusing to send empty text' };
   if (!hasTmux()) return { ok: false, label: sanitize(label), status: 'error', error: 'tmux not installed' };
   const name = sanitize(label);
   if (!windowAlive(name)) return { ok: false, label: name, status: 'gone' };
@@ -239,17 +274,20 @@ function sendIfReady(label, text) {
 // do NOT try to detect "text still sitting in the input box" — Claude echoes the submitted message
 // into the transcript with a '>' prefix, indistinguishable from an unsent input line, so that check
 // only produced false "unverified" alarms on prompts that were actually accepted.
+const RUN_MARKER = /esc to interrupt|Compacting conversation/i;
+// Pure transition core (testable without a pane). The marker can be left over from a PRIOR turn
+// (echoed transcript text on the visible screen), so presence alone is a false positive: only a
+// TRANSITION — absent in the pre-send capture, present now — confirms THIS send started a turn.
+// Fall back to presence when the pre-capture failed (pre == null).
+function deliveryStatus(pre, after) {
+  const now = typeof after === 'string' && RUN_MARKER.test(after);
+  const was = typeof pre === 'string' ? RUN_MARKER.test(pre) : null;
+  return now && (was === null || !was) ? 'started' : 'sent';
+}
 function confirmDelivery(rec) {
   if (!rec || rec.status !== 'pending') return rec;
-  const MARKER = /esc to interrupt|Compacting conversation/i;
   const after = tmux(['capture-pane', '-p', '-t', target(rec.label)]);
-  const now = after.code === 0 && MARKER.test(after.out);
-  // The marker can be left over from a PRIOR turn (echoed transcript text on the visible screen),
-  // so presence alone is a false positive: only a TRANSITION — absent in the pre-send capture,
-  // present now — confirms THIS send started a turn. Fall back to presence when pre-capture failed.
-  const was = typeof rec.pre === 'string' ? MARKER.test(rec.pre) : null;
-  const running = now && (was === null || !was);
-  return { ...rec, status: running ? 'started' : 'sent' };
+  return { ...rec, status: deliveryStatus(rec.pre, after.code === 0 ? after.out : '') };
 }
 
 // Send a reply to ONE managed window, honestly: gate on readiness (sendIfReady), then confirm the
@@ -258,7 +296,7 @@ function confirmDelivery(rec) {
 function deliver(label, text) {
   const rec = sendIfReady(label, text);
   if (rec.status !== 'pending') return rec;
-  spawnSync('sleep', [String(CONFIRM_MS / 1000)]);
+  msleep(CONFIRM_MS);
   return confirmDelivery(rec);
 }
 
@@ -269,14 +307,14 @@ function deliver(label, text) {
 // (interrupt/panic) are intentional control signals and fire into every pane regardless of stage.
 function sayAll(payload) {
   payload = payload || {};
-  const ws = listManaged();
+  const ws = listManaged({ readonly: true });
   let results;
   if (payload.key) {
     results = ws.map((w) => { const r = key(w.label, payload.key); return { ok: r.ok, label: w.label, status: r.ok ? 'sent' : 'error', error: r.error }; });
   } else {
     results = ws.map((w) => sendIfReady(w.label, payload.text || ''));   // fire all — no per-window wait
     if (results.some((r) => r.status === 'pending')) {
-      spawnSync('sleep', [String(CONFIRM_MS / 1000)]);                   // settle ONCE for the whole batch
+      msleep(CONFIRM_MS);                                                // settle ONCE for the whole batch
       results = results.map(confirmDelivery);
     }
   }
@@ -351,32 +389,35 @@ function attachCommand(label) {
 // stranded in the input box (bare Enter, a no-op on an empty box) and, if still idle, resend.
 // Capped at 3 sends. A turn that completes within the ~1.2s verify window would look like a lost
 // send, but no real turn (model roundtrip + file reads) finishes that fast.
+const ADOPT_DEADLINE_MS = 60000; // forks load a lot of history — allow up to ~60s of boot/startup menus
+const BOOT_POLL_MS = 700;        // re-sample cadence while the pane is still booting / at a startup menu
+const VERIFY_MS = 1200;          // post-send window to see the turn start; no real turn finishes faster
 function deliverAdopted(label, text) {
-  const deadline = Date.now() + 60000;
+  const deadline = Date.now() + ADOPT_DEADLINE_MS;
   let resumeAnswered = false, attempts = 0, flushed = false;
   (function tick() {
     if (Date.now() > deadline) return;
     try {
       const stage = paneStage(label);
       if (stage === 'gone') return;
-      if (stage === 'trust') { answerTrust(label); return setTimeout(tick, 700); }
+      if (stage === 'trust') { answerTrust(label); return setTimeout(tick, BOOT_POLL_MS); }
       if (stage === 'resume') {                       // pick "full session as-is" once, then let it clear
         if (!resumeAnswered) { resumeAnswered = true; resumeFull(label); }
         return setTimeout(tick, 1000);
       }
       if (stage === 'running' || stage === 'busy') {
         if (attempts > 0) return;                     // delivered and the turn visibly took — done
-        return setTimeout(tick, 700);                 // still booting before first delivery
+        return setTimeout(tick, BOOT_POLL_MS);        // still booting before first delivery
       }
       // stage === 'ready'
       if (!text || !text.trim()) return;
-      if (attempts === 0) { attempts = 1; say(label, text); return setTimeout(tick, 1200); }
+      if (attempts === 0) { attempts = 1; say(label, text); return setTimeout(tick, VERIFY_MS); }
       // A send didn't start a turn. First flush (the text may be sitting in the box with a lost
       // Enter — submitting it is the fix, and Enter on an empty box is harmless), then resend.
-      if (!flushed) { flushed = true; key(label, 'Enter'); return setTimeout(tick, 1200); }
+      if (!flushed) { flushed = true; key(label, 'Enter'); return setTimeout(tick, VERIFY_MS); }
       if (attempts >= 3) return;                      // give up — callers' watchdogs take over
       attempts++; flushed = false; say(label, text);
-      return setTimeout(tick, 1200);
+      return setTimeout(tick, VERIFY_MS);
     } catch { /* ignore */ }
   })();
 }
@@ -384,10 +425,16 @@ function deliverAdopted(label, text) {
 function stop(label) {
   const name = sanitize(label);
   const r = tmux(['kill-window', '-t', target(name)]);
-  const reg = loadReg();
-  delete reg.windows[name];
-  saveReg(reg);
-  return { ok: r.code === 0, label: name };
+  // Only drop the registry entry when the window is actually dead (kill succeeded, or it was
+  // already gone) — deleting it on a FAILED kill would orphan a live window the cockpit can no
+  // longer see or control, while reporting "stopped".
+  const gone = r.code === 0 || !windowAlive(name);
+  if (gone) {
+    const reg = loadReg();
+    delete reg.windows[name];
+    saveReg(reg);
+  }
+  return { ok: gone, label: name, error: gone ? undefined : (r.err || 'tmux kill-window failed') };
 }
 
 // Late-bind a window's sessionId: claude only writes a transcript once you send the first
@@ -400,6 +447,10 @@ function stop(label) {
 // one created nearest this window's launch) rather than the newest. Resolving windows in launch
 // order (see listManaged) lets earlier windows claim their earlier transcripts first, so N
 // windows map to N distinct sessions.
+// `created` is a ms-precision Date.now() captured just before launch, but transcript mtimes can be
+// rounded to coarser fs granularity — so a transcript written right at launch can stat EARLIER
+// than `created`. The margin keeps those from being filtered out as pre-existing.
+const CREATED_SKEW_MS = 1500;
 function resolveSession(w, claimed) {
   if (w.sessionId) return w.sessionId;
   try {
@@ -407,7 +458,7 @@ function resolveSession(w, claimed) {
     const files = fs.readdirSync(dir)
       .filter((f) => f.endsWith('.jsonl'))
       .map((f) => ({ id: f.replace(/\.jsonl$/, ''), m: fs.statSync(path.join(dir, f)).mtimeMs }))
-      .filter((x) => x.m >= (w.created || 0) - 1500)
+      .filter((x) => x.m >= (w.created || 0) - CREATED_SKEW_MS)
       .filter((x) => !claimed || !claimed.has(x.id))
       .sort((a, b) => a.m - b.m);
     if (files.length) return files[0].id;
@@ -416,10 +467,17 @@ function resolveSession(w, claimed) {
 }
 
 // All managed windows, with liveness. Prunes dead ones; late-binds missing sessionIds.
-function listManaged() {
+// Pass { readonly: true } from callers that only READ (swarm-say, list views): they get the same
+// pruned/late-bound view but never write the registry back — the registry is shared across
+// processes, and a read-modify-write from every swarm-say invocation raced the server's poll.
+function listManaged(opts = {}) {
   const reg = loadReg();
   const out = [];
   let changed = false;
+  // ONE `tmux list-windows` for the whole registry — a per-window spawnSync turned every poll
+  // into a process storm proportional to fleet size.
+  const lw = tmux(['list-windows', '-t', SESSION, '-F', '#{window_name}']);
+  const alive = new Set(lw.code === 0 ? lw.out.split('\n') : []);
   // Resolve in launch order, tracking already-bound sessionIds, so a same-cwd swarm never
   // collapses N windows onto one transcript (BUG-1).
   const names = Object.keys(reg.windows).sort((a, b) => (reg.windows[a].created || 0) - (reg.windows[b].created || 0));
@@ -427,22 +485,23 @@ function listManaged() {
   for (const name of names) { const sid = reg.windows[name].sessionId; if (sid) claimed.add(sid); }
   for (const name of names) {
     const w = reg.windows[name];
-    if (!windowAlive(name)) { delete reg.windows[name]; changed = true; continue; }
+    if (!alive.has(name)) { delete reg.windows[name]; changed = true; continue; }
     if (!w.sessionId) { const sid = resolveSession(w, claimed); if (sid) { w.sessionId = sid; claimed.add(sid); changed = true; } }
     out.push({ ...w, alive: true });
   }
-  if (changed) saveReg(reg);
+  if (changed && !opts.readonly) saveReg(reg);
   return out;
 }
 
-// sessionId -> managed window, for the cockpit to flag/control the right card.
-function managedBySession() {
+// sessionId -> managed window, for the cockpit to flag/control the right card. Accepts a
+// pre-fetched listManaged() result so one poll cycle doesn't re-walk the registry per use.
+function managedBySession(ws) {
   const map = {};
-  for (const w of listManaged()) {
+  for (const w of (ws || listManaged())) {
     if (w.sessionId) map[w.sessionId] = w;
     if (w.adoptedFrom) map[w.adoptedFrom] = w; // flag the ORIGINAL (clicked) card as managed too
   }
   return map;
 }
 
-module.exports = { run, adopt, uniqueLabel, say, deliver, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, approveMenu, denyMenu, deliverAdopted, sanitize, windowAlive, tailLines, classifyPane, resolveSession, hasTmux, SESSION, REG_FILE };
+module.exports = { run, adopt, uniqueLabel, say, deliver, sendIfReady, sayAll, key, stop, openTerminal, listManaged, managedBySession, attachCommand, trustPromptShowing, paneStage, resumeFull, answerTrust, approveMenu, denyMenu, deliverAdopted, sanitize, windowAlive, tailLines, classifyPane, resolveSession, deliveryStatus, shellQuote, loadReg, hasTmux, SESSION, REG_FILE };

@@ -2,4 +2,6 @@ node_modules/
 .DS_Store
 *.local.md
 *.log
+# the per-run eval logs are the evidence README/RESULTS.md cite — don't let *.log swallow them
+!evals/logs/*.log
 .gstack/

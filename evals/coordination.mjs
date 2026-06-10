@@ -77,7 +77,7 @@ function tmuxCaptureTail(label) {
 // same logic the board's approve button uses), so the harness and the product can't drift.
 function driveApprovals(swarmName) {
   let acted = 0;
-  for (const w of manage.listManaged().filter((x) => x.swarm === swarmName)) {
+  for (const w of manage.listManaged({ readonly: true }).filter((x) => x.swarm === swarmName)) {
     const pane = tmuxCaptureTail(w.label);
     if (!pane) continue;
     const stage = manage.classifyPane(pane);
@@ -118,7 +118,7 @@ async function oneRun({ name, topology, agents, model, timeout, purpose }) {
   let completed = false, rekicks = 0, lastKickMs = started;
   while (Date.now() < deadlineMs) {
     driveApprovals(name);
-    for (const w of manage.listManaged().filter((x) => x.swarm === name)) {
+    for (const w of manage.listManaged({ readonly: true }).filter((x) => x.swarm === name)) {
       const stage = manage.paneStage(w.label);
       if (stage !== lastStage[w.label]) { note(`${w.label} → ${stage}`); lastStage[w.label] = stage; }
     }

@@ -1,0 +1,7 @@
+0.2s evalbase0765-s2 → busy
+0.2s evalbase0765-s1 → busy
+2.8s evalbase0765-s2 → ready
+2.8s evalbase0765-s1 → ready
+5.3s evalbase0765-s2 → running
+5.3s evalbase0765-s1 → running
+25.8s end: completed · baton 3/1

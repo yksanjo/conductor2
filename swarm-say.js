@@ -26,7 +26,9 @@ function main() {
   }
   const target = manage.sanitize(window);
   // Members of this swarm, from the live registry (not just whatever the caller claims).
-  const members = manage.listManaged().filter((w) => w.swarm === swarm);
+  // readonly: every agent message spawns this process, and a read-modify-write here raced the
+  // server's poll on the shared registry file — swarm-say only ever needs to READ it.
+  const members = manage.listManaged({ readonly: true }).filter((w) => w.swarm === swarm);
   const member = members.find((w) => w.label === target);
   if (!member) {
     const names = members.map((w) => w.label).join(', ') || '(none live)';

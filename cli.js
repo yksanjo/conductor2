@@ -116,8 +116,10 @@ function main() {
     if (!name) { console.error(`${C.err}✗ usage: conductor2 stop <swarm> --yes${C.r}`); process.exit(1); }
     if (!o.yes) { console.error(`${C.warn}⚠ stopping kills every window in "${name}" — add --yes to confirm.${C.r}`); process.exit(1); }
     const r = swarm.stopSwarm(name);
-    if (!r.ok) { console.error(`${C.err}✗ ${r.error}${C.r}`); process.exit(1); }
-    console.log(`${C.ok}✕ stopped "${r.swarm}" (${r.stopped.join(', ')})${C.r}`);
+    if (!r.ok && !(r.stopped && r.stopped.length)) { console.error(`${C.err}✗ ${r.error || ('failed to kill: ' + (r.failed || []).join(', '))}${C.r}`); process.exit(1); }
+    if (r.stopped.length) console.log(`${C.ok}✕ stopped "${r.swarm}" (${r.stopped.join(', ')})${C.r}`);
+    // A failed kill leaves a live window — say so instead of folding it into "stopped".
+    if (r.failed && r.failed.length) { console.error(`${C.err}✗ failed to kill: ${r.failed.join(', ')} — still live${C.r}`); process.exit(1); }
     return;
   }
 

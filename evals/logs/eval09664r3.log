@@ -1,0 +1,12 @@
+0.3s eval09664r3-s2 → busy
+0.3s eval09664r3-s3 → busy
+0.3s eval09664r3-s1 → busy
+3.0s eval09664r3-s2 → ready
+3.0s eval09664r3-s3 → ready
+3.1s eval09664r3-s1 → ready
+5.6s eval09664r3-s2 → running
+5.7s eval09664r3-s3 → running
+5.7s eval09664r3-s1 → running
+10.8s eval09664r3-s3 → ready
+83.5s eval09664r3-s3 → running
+109.5s end: completed · baton 3/3
