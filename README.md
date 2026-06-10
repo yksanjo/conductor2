@@ -163,6 +163,9 @@ V2 uses `conductor2` + `~/.conductor2/managed.json` — a V2 swarm is invisible 
 cockpit, and vice versa. V2 is the superset for fleets you fire; V1 remains the watcher for
 windows you opened by hand.
 
+Where this goes next — standing missions, verified outcomes, one decision inbox — is sketched
+in [docs/V3.md](docs/V3.md).
+
 ## Surfaces
 
 - `conductor2 up` — launch pad (`/`) + cockpit board (`/board`) on `:7592`
