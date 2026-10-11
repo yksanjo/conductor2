@@ -1,0 +1,13 @@
+{
+  "name": "nightly-repo-health",
+  "purpose": "Review the repo for failing tests, stale TODOs and risky dependencies. Draft a prioritized fix list. Do not change source files.",
+  "trigger": { "cron": "0 3 * * *" },
+  "swarm": { "topology": "pipeline", "size": 3 },
+  "inputs": [{ "name": "repo", "path": "." }],
+  "allowedOps": ["read", "research", "draft", "write-workspace"],
+  "budget": { "minutes": 45, "tokens": 500000 },
+  "deliverable": { "file": "REPORT.md", "requiredSections": ["Summary", "Findings", "Proposed actions"] },
+  "verifier": { "sections": true, "command": "npm test" },
+  "retry": { "max": 1 },
+  "escalate": { "to": "inbox" }
+}
