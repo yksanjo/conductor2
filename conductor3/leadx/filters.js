@@ -2,7 +2,8 @@
 // Filters in a fixed order. Each returns a reason string when a lead must be dropped, else null.
 
 const GENERIC_ROLES = ['info', 'hello', 'contact', 'office', 'team', 'press', 'sales', 'support', 'admin', 'mail', 'enquiries', 'inquiries'];
-const FREEMAIL = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'proton.me', 'protonmail.com', 'aol.com'];
+// Shared mailbox providers are NOT firms: never lock or suppress the whole domain, dedupe by exact address only.
+const FREEMAIL = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'ymail.com', 'outlook.com', 'hotmail.com', 'hotmail.co.uk', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'aol.com', 't-online.de', 'web.de', 'gmx.de', 'gmx.net', 'gmx.com', 'mail.com', 'yandex.com', 'qq.com', '163.com'];
 
 function parseCsv(text) {
   const rows = []; let row = [], cur = '', q = false;
@@ -25,7 +26,7 @@ function buildList(rows) {
   const emails = new Map(), domains = new Map();
   for (const r of rows) {
     if (r.email) emails.set(r.email.toLowerCase(), r.reason || r.source || '');
-    if (r.domain) domains.set(r.domain.toLowerCase().replace(/^www\./, ''), r.reason || r.source || '');
+    if (r.domain && !FREEMAIL.includes(r.domain.toLowerCase().replace(/^www\./, ''))) domains.set(r.domain.toLowerCase().replace(/^www\./, ''), r.reason || r.source || '');
   }
   return { emails, domains };
 }
