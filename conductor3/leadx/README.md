@@ -11,7 +11,7 @@ Status: fixture-tested only (`node conductor3/leadx/test.js`, no network). Not r
 | Proof per lead | Every lead keeps `source_url`, the exact `raw` text, and a `quote` around it. `verify` re-extracts the address from the quote; a lead it can't recover fails. |
 | No LinkedIn / people-data sites | `guard.js` blocks the hosts (social networks, zoominfo, apollo, hunter, etc.) in the fetch layer, including redirects and followed links. |
 | Firm's own site only | Pages are fetched only on the target domain; same-site links only. |
-| Region exclusion | Lane config: `excludeTlds` (e.g. `[".jp"]`) and `excludeTerms` (e.g. `["Tokyo","Japan"]`). A page naming an excluded term drops the whole domain. |
+| Region exclusion | Lane config. `excludeTlds` (e.g. `[".jp"]`): never fetched. `excludeTerms`: a page naming one drops the whole domain (use for hard categories). `flagTerms` (e.g. `["Japan","Tokyo"]`): a page naming one flags the lead `region-term:<term>` for human review instead of dropping, so a US arm of a foreign-owned firm still reaches a human. |
 | Opt-out | `suppression.csv`: exact address or whole domain. Suppressed domains are not even fetched. |
 | Never contact twice, across lanes | One contacts ledger for every lane. A contacted address excludes that address; a contacted firm (the domain of any contacted address, except freemail providers) excludes the whole firm, in every lane. `verify` fails the run on any overlap, and fails if no ledger is given. |
 | No parallel overlap | After a run, candidates are appended to `claims.csv` (with a run id), so another lane's run can't pick the same address or firm before outreach happens. |
