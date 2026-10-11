@@ -1,0 +1,20 @@
+{
+  "name": "lead-extraction-nightly",
+  "purpose": "Extract email addresses that are literally published on target firms' own sites for one outreach lane. Never guess or pattern-build an address. Never touch LinkedIn or people-data sites. Drop suppressed, excluded and already-known contacts. Output candidates for batch review; send nothing.",
+  "trigger": { "cron": "0 1 * * *" },
+  "swarm": { "topology": "pipeline", "size": 2 },
+  "inputs": [
+    { "name": "lane", "path": "lanes/lane.json" },
+    { "name": "targets", "path": "lanes/targets.txt" },
+    { "name": "contacts", "path": "ledger/contacts.csv" },
+    { "name": "claims", "path": "ledger/claims.csv" },
+    { "name": "suppression", "path": "ledger/suppression.csv" },
+    { "name": "exclusions", "path": "ledger/exclusions.csv" }
+  ],
+  "allowedOps": ["read", "research", "write-workspace"],
+  "budget": { "minutes": 60 },
+  "deliverable": { "file": "REPORT.md", "requiredSections": ["Summary", "Lead batch", "Dropped", "Skipped sites"] },
+  "verifier": { "sections": true, "command": "node conductor3/leadx/cli.js verify --out . --contacts ledger/contacts.csv --claims ledger/claims.csv" },
+  "retry": { "max": 1 },
+  "escalate": { "to": "inbox" }
+}
