@@ -88,6 +88,14 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'leadx-'));
   const wr = await runLeadx({ targets: ['good.com'], lane, contacts: C([]), suppression: L([]), exclusions: L([]), watchlist: filters.buildWatchlist([{ name: 'Pat' }]), fetchFn });
   ok(wr.leads.length === 3 && wr.leads.some((l) => l.flags.includes('watchlist:Pat')), 'a watchlist hit is flagged for human check, not dropped');
 
+  console.log('\nregion handling');
+  const US = { 'https://usarm.com/robots.txt': { status: 404, text: '' }, 'https://usarm.com/': { status: 200, text: 'US arm of a Japan-owned group. Write hi@usarm.com' } };
+  const ff = async (u) => US[u] || { status: 404, text: '' };
+  const flagged = await runLeadx({ targets: ['usarm.com'], lane: { name: 'job', excludeTlds: ['.jp'], flagTerms: ['Japan'] }, contacts: C([]), suppression: L([]), exclusions: L([]), fetchFn: ff });
+  ok(flagged.leads.length === 1 && flagged.leads[0].flags.includes('region-term:Japan'), 'flagTerms on a .com domain flag the lead for review instead of dropping it');
+  const dropped = await runLeadx({ targets: ['usarm.com', 'firm.jp'], lane: { name: 'job', excludeTlds: ['.jp'], excludeTerms: ['Japan'] }, contacts: C([]), suppression: L([]), exclusions: L([]), fetchFn: ff });
+  ok(dropped.leads.length === 0 && dropped.stats.skipped['region-term'] === 1 && dropped.stats.skipped['region-tld'] === 1, 'excludeTerms still hard-drops; excluded TLDs are never fetched');
+
   console.log('\nverify (mechanical checks)');
   const bad = tmp(); fs.writeFileSync(path.join(bad, 'leads.jsonl'), JSON.stringify({ email: 'guess@firm.com', firm_domain: 'firm.com', lane: 'x', source_url: 'https://firm.com/', quote: 'Our team: Ann Lee', raw: 'guess@firm.com', status: 'candidate' }) + '\n');
   const le = path.join(dir, 'l.csv'); fs.writeFileSync(le, 'email,domain,lane\n');
