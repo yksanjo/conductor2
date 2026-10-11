@@ -80,6 +80,14 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'leadx-'));
   const run2 = await runLeadx({ targets: ['other.com'], lane: { name: 'deadstock' }, contacts: C(rows), suppression: L([]), exclusions: L([]), fetchFn });
   ok(run2.leads.length === 0 && Object.keys(run2.stats.dropped).some((k) => /already-contacted/.test(k)), 'second lane cannot take an address or firm the first lane claimed');
 
+  console.log('\nwatchlist');
+  const wl = filters.buildWatchlist([{ name: 'Funko' }, { name: 'UMG' }, { name: 'Jerry Colonna' }]);
+  ok(filters.watchHits(wl, 'funko-shop.com', '').includes('Funko'), 'watchlist matches a firm name inside the domain');
+  ok(filters.watchHits(wl, 'x.com', 'Press: UMG Recordings').includes('UMG') && !filters.watchHits(wl, 'x.com', 'a umgebung note').length, 'short all-caps names match as whole words only');
+  ok(filters.watchHits(wl, 'x.com', 'Partner Jerry Colonna runs this').includes('Jerry Colonna'), 'watchlist matches a person name on the page');
+  const wr = await runLeadx({ targets: ['good.com'], lane, contacts: C([]), suppression: L([]), exclusions: L([]), watchlist: filters.buildWatchlist([{ name: 'Pat' }]), fetchFn });
+  ok(wr.leads.length === 3 && wr.leads.some((l) => l.flags.includes('watchlist:Pat')), 'a watchlist hit is flagged for human check, not dropped');
+
   console.log('\nverify (mechanical checks)');
   const bad = tmp(); fs.writeFileSync(path.join(bad, 'leads.jsonl'), JSON.stringify({ email: 'guess@firm.com', firm_domain: 'firm.com', lane: 'x', source_url: 'https://firm.com/', quote: 'Our team: Ann Lee', raw: 'guess@firm.com', status: 'candidate' }) + '\n');
   const le = path.join(dir, 'l.csv'); fs.writeFileSync(le, 'email,domain,lane\n');
