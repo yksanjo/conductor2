@@ -40,6 +40,19 @@ function buildContacts(rows) {
   }
   return list;
 }
+// Contacted-by-name watchlist: firms/people reached with no email or domain on file (e.g. LinkedIn, WhatsApp).
+// A lead that surfaces one is FLAGGED for human check, never auto-passed and never silently dropped.
+const alnum = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+function buildWatchlist(rows) { return rows.map((r) => (r.name || '').trim()).filter((n) => alnum(n).length >= 3).map((name) => ({ name, norm: alnum(name), caps: !/\s/.test(name.trim()) })); }
+function watchHits(list, domain, pageText) {
+  const d = alnum(domain), hits = [];
+  for (const w of list) {
+    const esc = w.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const inText = new RegExp(`(^|[^A-Za-z0-9])${esc}($|[^A-Za-z0-9])`, w.caps ? '' : 'i').test(pageText || '');
+    if (inText || (w.norm.length >= 5 && d.includes(w.norm))) hits.push(w.name);
+  }
+  return hits;
+}
 function inDomains(list, domain) { for (const d of list.domains.keys()) if (domain === d || domain.endsWith('.' + d)) return d; return null; }
 
 function classify(email, firmDomain) {
@@ -61,4 +74,4 @@ function dropReason(lead, { contacts, suppression, exclusions, seen }) {
   return null;
 }
 
-module.exports = { parseCsv, buildList, buildContacts, inDomains, classify, dropReason, GENERIC_ROLES, FREEMAIL };
+module.exports = { parseCsv, buildList, buildContacts, buildWatchlist, watchHits, inDomains, classify, dropReason, GENERIC_ROLES, FREEMAIL };
