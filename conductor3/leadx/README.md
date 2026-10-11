@@ -16,6 +16,7 @@ Status: fixture-tested only (`node conductor3/leadx/test.js`, no network). Not r
 | Never contact twice, across lanes | One contacts ledger for every lane. A contacted address excludes that address; a contacted firm (the domain of any contacted address, except freemail providers) excludes the whole firm, in every lane. `verify` fails the run on any overlap, and fails if no ledger is given. |
 | No parallel overlap | After a run, candidates are appended to `claims.csv` (with a run id), so another lane's run can't pick the same address or firm before outreach happens. |
 | Shared mailbox providers | gmail.com, outlook.com, t-online.de and similar are never firm domains: a ledger or suppression row naming one locks the exact address only, never the provider. |
+| Contacted by name only | `watchlist.csv` (`name,lane,source`) holds firms/people reached with no email or domain (LinkedIn, WhatsApp). A lead whose domain or page names one is flagged `watchlist:<name>` and counted in REPORT.md for a human check. Flagged, not dropped, not auto-passed. |
 | Politeness | robots.txt honored, 1.5s between requests, identifying user agent, 200 domains/night, 5 pages/domain. |
 | Never sends | Leads are `status: candidate`. The mission grants no send op. |
 
@@ -23,6 +24,7 @@ Status: fixture-tested only (`node conductor3/leadx/test.js`, no network). Not r
 - `contacts.csv` (the shared ledger): `email,domain,lane,source`. Either column may be blank per row. Every outreach loop exports what it has contacted into this one file.
 - `suppression.csv`: `email,domain,reason`.
 - `exclusions.csv` (e.g. circles to avoid, music-tech): `email,domain,reason`.
+- `watchlist.csv`: `name,lane,source`. Names only; matching is by domain text or whole-word page text, so it can miss a firm that appears under another name.
 - `claims.csv`: written by leadx: `email,domain,lane,source,run`.
 - `lane.json`: `{ "name": "deadstock", "excludeTlds": [".jp"], "excludeTerms": ["Tokyo", "Japan"] }`
 - `targets.txt`: one domain or URL per line, `#` comments allowed.
