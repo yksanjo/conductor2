@@ -39,3 +39,6 @@ The history of this release is the tool reviewing itself, twice, and surviving:
 
 Inherited from V1: the transcript scanner, `lsof` liveness, the tmux control plane, and the
 CSRF/DNS-rebinding guard scheme.
+
+## conductor3 - iteration 1 (unreleased, design + skeleton)
+Mission file format, run-state model, and a draft mission runner under `conductor3/`. Tested with fakes only; not wired to live swarms. See `docs/CONDUCTOR3.md`.
