@@ -15,6 +15,7 @@ Status: fixture-tested only (`node conductor3/leadx/test.js`, no network). Not r
 | Opt-out | `suppression.csv`: exact address or whole domain. Suppressed domains are not even fetched. |
 | Never contact twice, across lanes | One contacts ledger for every lane. A contacted address excludes that address; a contacted firm (the domain of any contacted address, except freemail providers) excludes the whole firm, in every lane. `verify` fails the run on any overlap, and fails if no ledger is given. |
 | No parallel overlap | After a run, candidates are appended to `claims.csv` (with a run id), so another lane's run can't pick the same address or firm before outreach happens. |
+| Shared mailbox providers | gmail.com, outlook.com, t-online.de and similar are never firm domains: a ledger or suppression row naming one locks the exact address only, never the provider. |
 | Politeness | robots.txt honored, 1.5s between requests, identifying user agent, 200 domains/night, 5 pages/domain. |
 | Never sends | Leads are `status: candidate`. The mission grants no send op. |
 
