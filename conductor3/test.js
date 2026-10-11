@@ -5,6 +5,8 @@ let pass = 0, fail = 0;
 const ok = (c, m) => { c ? (pass++, console.log('  ✓ ' + m)) : (fail++, console.error('  ✗ ' + m)); };
 const good = mission.load(path.join(__dirname, 'missions/nightly-repo-health.json'));
 ok(true, 'example mission validates');
+const rel = mission.load(path.join(__dirname, 'missions/relationship-ops-nightly.json'));
+ok(rel.allowedOps.every((o) => !mission.GATED.includes(o)), 'relationship-ops mission validates and grants no gated op');
 ok(mission.validate({ ...good, allowedOps: ['read', 'send'] }).some((e) => /gated/.test(e)), 'send is rejected as gated');
 ok(mission.validate({ ...good, deliverable: { file: '../x', requiredSections: [] } }).length > 0, 'path escape rejected');
 const r = state.create('m');
