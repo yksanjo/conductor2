@@ -1,1 +1,1 @@
-{ "name": "deadstock", "excludeTlds": [".jp"], "excludeTerms": ["Tokyo", "Japan"] }
+{ "name": "deadstock", "excludeTlds": [".jp"], "flagTerms": ["Tokyo", "Japan"], "excludeTerms": [] }
