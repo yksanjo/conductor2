@@ -37,7 +37,9 @@ async function crawlDomain(domain, lane, fetchFn, maxPages, watchlist = []) {
     const hit = (lane.excludeTerms || []).find((t) => new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
     if (hit) { res.pages = []; res.leads = []; res.skipped = `region-term:${hit}`; return res; }
     const watch = filters.watchHits(watchlist, domain, text);
-    for (const e of extractEmails(r.text)) res.leads.push({ ...e, source_url: url, watch });
+    // flagTerms: region words on a non-excluded TLD (e.g. a US arm of a Japan-owned firm) are flagged for human review, not dropped.
+    const regionFlags = (lane.flagTerms || []).filter((t) => new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)).map((t) => `region-term:${t}`);
+    for (const e of extractEmails(r.text)) res.leads.push({ ...e, source_url: url, watch, regionFlags });
     if (!home) { home = r.text; for (const p of [...candidateLinks(home, url, domain), ...CANDIDATE_PATHS.map((p) => base + p)]) queue.push(p); }
   }
   return res;
@@ -57,7 +59,7 @@ async function runLeadx({ targets, lane, contacts, suppression, exclusions, watc
     stats.fetched_domains++; stats.pages += r.pages.length;
     for (const e of r.leads) {
       stats.extracted++;
-      const lead = { email: e.email, name: e.name || null, firm_domain: domain, lane: lane.name, source_url: e.source_url, quote: e.quote, raw: e.raw, kind: e.kind, flags: [...filters.classify(e.email, domain), ...e.watch.map((n) => `watchlist:${n}`)], fetched_at: now().toISOString(), status: 'candidate', run_id: runId };
+      const lead = { email: e.email, name: e.name || null, firm_domain: domain, lane: lane.name, source_url: e.source_url, quote: e.quote, raw: e.raw, kind: e.kind, flags: [...filters.classify(e.email, domain), ...e.watch.map((n) => `watchlist:${n}`), ...e.regionFlags], fetched_at: now().toISOString(), status: 'candidate', run_id: runId };
       const why = filters.dropReason(lead, { contacts, suppression, exclusions, seen });
       if (why) { stats.dropped[why] = (stats.dropped[why] || 0) + 1; continue; }
       seen.add(lead.email); leads.push(lead); stats.kept++;
@@ -75,7 +77,7 @@ function writeOutputs(outDir, leads, stats, lane, when) {
   fs.writeFileSync(path.join(outDir, 'REPORT.md'), [
     `# leadx report: ${lane.name}`, '', `Run at ${when.toISOString()}. Candidates only. Nothing was sent.`, '',
     '## Summary', `- target domains: ${stats.targets} (over the ${LIMITS.maxDomains}/night cap, not processed: ${stats.over_cap})`,
-    `- domains fetched: ${stats.fetched_domains}, pages read: ${stats.pages}`, `- addresses found on pages: ${stats.extracted}`, `- kept as candidates: ${stats.kept} (${flagged} carry a review flag, ${watched} match the contacted-by-name watchlist and need a human check before any outreach)`, '',
+    `- domains fetched: ${stats.fetched_domains}, pages read: ${stats.pages}`, `- addresses found on pages: ${stats.extracted}`, `- kept as candidates: ${stats.kept} (${flagged} carry a review flag, ${watched} match the contacted-by-name watchlist and ${leads.filter((l) => l.flags.some((x) => x.startsWith('region-term:'))).length} mention a region term; all need a human check before any outreach)`, '',
     '## Lead batch', `${stats.kept} candidates in leads.jsonl. Each has source_url and the exact on-page quote. Review before any outreach.`, '',
     '## Dropped', kv(stats.dropped), '', '## Skipped sites', kv(stats.skipped), `- pages blocked by robots.txt: ${stats.robots_blocked_pages}`, '',
   ].join('\n'));
