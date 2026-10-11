@@ -65,6 +65,10 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'leadx-'));
   ok(known.leads.length === 0 && known.stats.dropped['already-contacted-firm'] === 1, 'firm contacted in another lane is excluded everywhere (even a different address)');
   const gm = C([{ email: 'me@gmail.com', lane: 'job' }]);
   ok(!gm.domains.has('gmail.com'), 'a freemail contact does not exclude the whole provider');
+  const sp = C([{ email: 'a@t-online.de', domain: 't-online.de', lane: 'deadstock' }, { email: 'b@gmail.com', domain: 'gmail.com', lane: 'deadstock' }]);
+  ok(!sp.domains.has('t-online.de') && !sp.domains.has('gmail.com') && sp.emails.has('a@t-online.de'), 'shared providers listed in the domain column lock the exact address only, never the provider');
+  const sup = L([{ email: 'x@outlook.com', domain: 'outlook.com', reason: 'bounced' }]);
+  ok(!sup.domains.has('outlook.com') && sup.emails.has('x@outlook.com'), 'a suppression row for a shared provider suppresses the address, not the provider');
   // claims: a first lane run claims its leads; a second lane cannot pick the same firm
   const dir = tmp(), claims = path.join(dir, 'claims.csv'), ledger = path.join(dir, 'contacts.csv');
   fs.writeFileSync(ledger, 'email,domain,lane,source\nold@somewhere.com,somewhere.com,job,sent\n');
