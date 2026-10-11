@@ -8,6 +8,7 @@
     { "name": "targets", "path": "lanes/targets.txt" },
     { "name": "contacts", "path": "ledger/contacts.csv" },
     { "name": "claims", "path": "ledger/claims.csv" },
+    { "name": "watchlist", "path": "ledger/watchlist.csv" },
     { "name": "suppression", "path": "ledger/suppression.csv" },
     { "name": "exclusions", "path": "ledger/exclusions.csv" }
   ],
