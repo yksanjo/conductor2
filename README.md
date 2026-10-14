@@ -1,5 +1,15 @@
 # 🎼 Conductor V2 — configure the swarm, then fire
 
+Coordinate Claude Code crews from one local cockpit, with explicit plans and visible handoffs.
+
+## Try the safe demo
+
+```sh
+node demo-plan.js
+```
+
+An offline demo prints three topologies and their launch order. It does not launch tmux or call a model. For the actual cockpit, run `node cli.js up`; launching a crew requires your installed Claude CLI, a valid model ID and any account charges it incurs. This preview does not establish live swarm reliability.
+
 V1 ([conductor](https://github.com/yksanjo/conductor)) watches Claude Code windows you already opened.
 **V2 flips the order: you design the fleet first.** Pick a swarm topology, load a preset, write the
 mission, press **FIRE** — and a crew of Claude Code agents launches on **Fable 5**, coordinates over
