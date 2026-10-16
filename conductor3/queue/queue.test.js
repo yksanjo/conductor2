@@ -37,7 +37,7 @@ tick(d2, { now: DAY }); ok(Q.load(d2).items[1].status === 'needs-approval', 'a n
   ok((await req('POST', '/api/approve/' + id, { 'x-token': 'wrong' })).s === 403, 'approve with wrong token is refused');
   ok((await req('POST', '/api/approve/' + id, { 'x-token': token, origin: 'http://evil.example' })).s === 403, 'approve from foreign origin is refused');
   ok((await req('GET', '/', { host: 'evil.example' })).s === 403, 'foreign Host header refused (DNS rebinding)');
-  ok((await req('POST', '/api/approve/' + id, { 'x-token': token })).s === 200 && Q.load(d3).items[0].approval.source === 'dashboard-click', 'approve with token records a dashboard-click approval');
+  ok((await req('POST', '/api/approve/' + id, { 'x-token': token })).s === 200 && Q.load(d3).items[0].approval.source === 'dashboard-click' && /^[0-9a-f]{16}$/.test(Q.load(d3).items[0].approval.contentHash), 'approve with token records a dashboard-click approval bound to the content');
   tick(d3, { now: DAY }); ok(Q.load(d3).items[0].status === 'ready', 'next tick moves it to ready (still not sent)');
   ok((await req('POST', '/api/approve/' + id, { 'x-token': token })).s === 409, 'cannot re-approve a non-waiting item');
   srv.close(); console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
