@@ -42,3 +42,8 @@ CSRF/DNS-rebinding guard scheme.
 
 ## conductor3 - iteration 1 (unreleased, design + skeleton)
 Mission file format, run-state model, and a draft mission runner under `conductor3/`. Tested with fakes only; not wired to live swarms. See `docs/CONDUCTOR3.md`.
+
+## conductor3 - iteration 2 (unreleased, queue + gate + dashboard)
+- `conductor3/queue/`: file-backed queue with exclusive claims, policy gate as code (no as-him sends 9pm-8am; send/money/commitment need approval; an approval counts only from a dashboard click; fail closed), idempotent `tick`, local dashboard (127.0.0.1 only, token-gated approve/reject), and a CLI (`add`, `drop`, `tick`, `approvals`; no approve command by design).
+- `conductor3/spend.js` daily cap that fails closed, `conductor3/inbox.js` morning decision inbox, `conductor3/install/` macOS installer + nightly script.
+- Honest status: nothing in here executes a send, post or payment. A separate gated executor does not exist yet, and nothing launches AI workers yet.
