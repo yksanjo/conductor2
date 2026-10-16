@@ -29,7 +29,7 @@ Q.update(d2, q.items[1].id, { status: 'approved', approval: { source: 'ping', de
 tick(d2, { now: DAY }); ok(Q.load(d2).items[1].status === 'needs-approval', 'a non-dashboard "approval" is bounced back to needs-approval');
 // dashboard
 (async () => {
-  const d3 = tmp(); Q.add(d3, { lane: 'job', title: '<b>x</b> send', kind: 'send' }); tick(d3, { now: DAY }); const id = Q.load(d3).items[0].id;
+  const d3 = tmp(); Q.add(d3, { lane: 'job', title: '<b>x</b> send', kind: 'send' }, new Date(DAY.getTime() - 60000)); tick(d3, { now: DAY }); const id = Q.load(d3).items[0].id;
   const { srv, token, port } = await D.serve(d3, { port: 0, now: () => DAY });
   const req = (method, p, headers = {}) => new Promise((r) => { const q = http.request({ host: '127.0.0.1', port, path: p, method, headers }, (res) => { let b = ''; res.on('data', (c) => (b += c)); res.on('end', () => r({ s: res.statusCode, b })); }); q.end(); });
   const home = await req('GET', '/'); ok(home.s === 200 && /Waiting on you \(1\)/.test(home.b) && !/<b>x<\/b>/.test(home.b) && /&lt;b&gt;x/.test(home.b), 'page shows waiting item, html escaped');
