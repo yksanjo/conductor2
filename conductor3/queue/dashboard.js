@@ -2,7 +2,7 @@
 // Local dashboard. Plain Node http, no deps, binds 127.0.0.1 only. Never sends anything.
 // Approve/Reject need the session token printed at startup (open the URL it prints). Only this path can create an approval.
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
-const Q = require('./queue'), P = require('./policy');
+const Q = require('./queue'), P = require('./policy'), { fp } = require('./executor');
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const ORDER = ['needs-approval', 'ready', 'held-quiet-hours', 'queued', 'claimed', 'drafted', 'approved', 'rejected'];
 function summary(dir, now = new Date()) {
@@ -37,7 +37,7 @@ function serve(dir, { port = 8787, now = () => new Date() } = {}) {
       if (!ok) { res.writeHead(403); return res.end('forbidden'); }
       const it = Q.load(dir).items.find((i) => i.id === m[2]); if (!it || it.status !== 'needs-approval') { res.writeHead(409); return res.end('not waiting for approval'); }
       const approved = m[1] === 'approve';
-      Q.update(dir, it.id, { approval: { source: 'dashboard-click', decision: approved ? 'approved' : 'rejected', at: now().toISOString() }, status: approved ? 'approved' : 'rejected' });
+      Q.update(dir, it.id, { approval: { source: 'dashboard-click', decision: approved ? 'approved' : 'rejected', at: now().toISOString(), contentHash: fp(it) }, status: approved ? 'approved' : 'rejected' });
       res.writeHead(200); return res.end('ok');
     }
     res.writeHead(404); res.end('not found');
