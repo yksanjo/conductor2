@@ -143,6 +143,7 @@ function report(dir, { roster = ROSTER } = {}) {
   section('Annotated - your decision, not theirs', by('annotated'), (i) => `- **${i.title}** [${i.kind}] - ${name(i.overseer.by)}: ${i.overseer.ready ? 'decision-ready' : 'NOT ready: ' + (i.overseer.missing || []).join('; ')}`);
   section('Returned to the worker', by('returned'), (i) => `- **${i.title}** [${i.lane}] - ${name(i.overseer.by)} asked: ${(i.overseer.questions || []).map((p) => p.question).join(' ')}`);
   section('Escalated - sent back twice, still not right', by('escalated'), (i) => `- **${i.title}** [${i.lane}] - ${name(i.overseer.by)}: ${(i.overseer.questions || []).map((p) => p.question).join(' ')}`);
+  section('Deferred - the overseer ran out of attention, back when rested', q.items.filter((i) => i.overseer && i.overseer.verdict === 'deferred'), (i) => `- **${i.title}** [${i.kind}] - held by ${name(i.overseer.by)}`);
   L.push('## Overseers', '');
   for (const p of roster) {
     const ps = state.overseers[p.id];
