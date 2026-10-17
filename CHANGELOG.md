@@ -39,3 +39,17 @@ The history of this release is the tool reviewing itself, twice, and surviving:
 
 Inherited from V1: the transcript scanner, `lsof` liveness, the tmux control plane, and the
 CSRF/DNS-rebinding guard scheme.
+
+## conductor3 - iteration 1 (unreleased, design + skeleton)
+Mission file format, run-state model, and a draft mission runner under `conductor3/`. Tested with fakes only; not wired to live swarms. See `docs/CONDUCTOR3.md`.
+
+## conductor3 - iteration 2 (unreleased, queue + gate + dashboard)
+- `conductor3/queue/`: file-backed queue with exclusive claims, policy gate as code (no as-him sends 9pm-8am; send/money/commitment need approval; an approval counts only from a dashboard click; fail closed), idempotent `tick`, local dashboard (127.0.0.1 only, token-gated approve/reject), and a CLI (`add`, `drop`, `tick`, `approvals`; no approve command by design).
+- `conductor3/spend.js` daily cap that fails closed, `conductor3/inbox.js` morning decision inbox, `conductor3/install/` macOS installer + nightly script.
+- Honest status: nothing in here executes a send, post or payment. A separate gated executor does not exist yet, and nothing launches AI workers yet.
+
+## conductor3 - iteration 3 (unreleased, simulated human overseers)
+- `conductor3/overseer/`: one simulated human overseer per agent. Conductor 1 was one human at a CLI watching N agents; this flips the ratio - every worker gets a named persona (strictness, attention budget, fatigue/recovery) that reviews its output overnight: endorses clean drafts, returns sloppy ones with the exact question (named rules `r-*`), defers when out of attention instead of rubber-stamping, and escalates after two failed returns.
+- Gated kinds (send/money/commitment) are only ever annotated for decision-readiness. Overseers never approve: approval still comes only from a dashboard click, enforced by `conductor3/queue/policy.js`, which this module never touches.
+- The worker half of the loop (`worker.js`): consumes returned questions, folds in material from the item's own artifacts, resubmits for re-review with the return count preserved, and says plainly when it is stuck instead of inventing answers. The dashboard now renders per-item overseer notes and the roster with energy levels.
+- Honest status: the judgment is deterministic rules, not a model - it checks shape and evidence, not taste or truth. Worker rework is mechanical (workpad or stuck), not rewriting; a rewriting worker would need a model, meaning spend and separate sign-off. 45 tests, plus `demo.js` and a CLI (`roster`, `tick`, `work`, `status`, `report`).

@@ -1,0 +1,36 @@
+'use strict';
+const fs = require('fs'), os = require('os'), path = require('path'), { execFileSync, spawnSync } = require('child_process');
+const Q = require('./queue'), C = require('./cli');
+let pass = 0, fail = 0; const ok = (c, m) => { c ? (pass++, console.log('  ✓ ' + m)) : (fail++, console.error('  ✗ ' + m)); };
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'c3c-')); const DAY = new Date('2026-10-16T15:00:00Z'), NIGHT = new Date('2026-10-17T03:00:00Z');
+const d = tmp(), dd = tmp();
+fs.writeFileSync(path.join(dd, 'a.json'), JSON.stringify({ lane: 'job', kind: 'send', title: 'note to X' }));
+fs.writeFileSync(path.join(dd, 'b.json'), JSON.stringify([{ title: 'research Y' }, { lane: 'deadstock', kind: 'money', title: 'buy lot' }]));
+fs.writeFileSync(path.join(dd, 'c.json'), JSON.stringify({ title: 'sneaky', kind: 'send', status: 'ready' }));
+fs.writeFileSync(path.join(dd, 'd.json'), JSON.stringify({ title: 'self-approve', kind: 'send', approval: { source: 'dashboard-click', decision: 'approved', at: '2099-01-01T00:00:00Z' } }));
+fs.writeFileSync(path.join(dd, 'e.json'), '{broken'); fs.writeFileSync(path.join(dd, 'f.json'), JSON.stringify({ title: 'bad kind', kind: 'nuke' }));
+fs.writeFileSync(path.join(dd, 'g.json'), JSON.stringify([{ title: 'ok one' }, { title: 'poison', kind: 'nuke' }]));
+fs.writeFileSync(path.join(dd, 'h.txt'), 'ignored');
+const r = C.drop(d, dd, DAY);
+ok(r.added === 3 && r.rejected === 5, 'drop: 3 valid items added, 5 bad files rejected (' + JSON.stringify(r) + ')');
+ok(Q.load(d).items.length === 3 && Q.load(d).items.every((i) => i.status === 'queued' && !i.approval), 'all dropped items start queued with no approval');
+ok(fs.readdirSync(path.join(dd, 'rejected')).length === 5 && fs.readdirSync(path.join(dd, 'done')).length === 2 && fs.existsSync(path.join(dd, 'h.txt')), 'files moved to done/rejected, non-json left alone');
+ok(!Q.load(d).items.some((i) => /ok one|poison/.test(i.title)), 'a file with one bad item adds none of its items');
+ok(C.drop(d, dd, DAY).added === 0, 'drop is idempotent (no reprocessing)');
+ok(/waiting on Yoshi/.test(C.tickLine(d, DAY)), 'tick prints one line');
+const l1 = C.tickLine(d, DAY), l2 = C.tickLine(d, DAY), l3 = C.tickLine(d, DAY);
+ok(![l1, l2, l3].some((l) => l.includes('\n')) && /nothing to claim/.test(l3) && /2 waiting on Yoshi/.test(l3), 'one line each; ends with nothing to claim and 2 waiting');
+const A = C.approvalsText(d, DAY);
+ok(/2 item\(s\) need your OK/.test(A) && /\[job\] note to X \(send\)/.test(A) && /\[deadstock\] buy lot \(money\)/.test(A) && /does not count/.test(A), 'approvals text lists items and says text replies do not count');
+ok(C.approvalsText(tmp(), DAY) === 'Nothing is waiting on your approval.', 'empty queue message');
+// held at night
+const id = Q.load(d).items.find((i) => i.kind === 'send').id; Q.update(d, id, { status: 'approved', approval: { source: 'dashboard-click', decision: 'approved', at: DAY.toISOString() } });
+C.tickLine(d, NIGHT); ok(Q.load(d).items.find((i) => i.id === id).status === 'held-quiet-hours' && /held until 8am/.test(C.approvalsText(d, NIGHT)), 'approved send is held at night and reported');
+C.tickLine(d, new Date('2026-10-17T13:00:00Z')); ok(Q.load(d).items.find((i) => i.id === id).status === 'ready', 'released to ready after 8am');
+// real CLI process
+const cli = path.join(__dirname, 'cli.js'), d2 = tmp();
+ok(/^queued q-/.test(execFileSync('node', [cli, 'add', d2, '--lane', 'job', '--kind', 'draft', '--title', 'hello']).toString()), 'cli add works');
+ok(/^tick /.test(execFileSync('node', [cli, 'tick', d2]).toString()), 'cli tick works');
+const bad = spawnSync('node', [cli, 'approve', d2, 'q-1']); ok(bad.status === 2 && /no approve command/.test(bad.stderr.toString()), 'there is no approve command');
+ok(spawnSync('node', [cli, 'add', d2, '--kind', 'nuke', '--title', 'x']).status === 2, 'cli add rejects unknown kind');
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
