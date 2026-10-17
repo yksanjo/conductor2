@@ -78,6 +78,7 @@ const r = O.report(d);
 ok(/# Overseer shift report/.test(r) && /Endorsed - ready to use \(1\)/.test(r) && /Returned to the worker \(1\)/.test(r) && /Annotated - your decision, not theirs \(1\)/.test(r), 'report has all sections with counts');
 ok(/Nothing was approved, sent, published or paid/.test(r), 'report states the invariant up front');
 ok(/decision-ready/.test(r), 'gated annotation says decision-ready');
+ok(!/Deferred - the overseer ran out of attention/.test(r), 'report omits the deferred section when nothing is deferred');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
