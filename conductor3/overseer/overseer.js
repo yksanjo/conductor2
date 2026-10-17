@@ -73,7 +73,7 @@ function decisionReady(item, persona) {
 function reviewable(item) {
   if (item.status !== 'drafted' && item.status !== 'needs-approval') return false;
   if (!item.overseer) return true;
-  return item.overseer.verdict === 'deferred'; // deferred items get another look next tick
+  return ['deferred', 'reworked'].includes(item.overseer.verdict); // deferred and reworked items get another look
 }
 
 // One review pass over the queue. Returns the list of actions taken.
