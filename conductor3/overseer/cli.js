@@ -3,6 +3,7 @@
 // Overseer CLI.
 //   node conductor3/overseer/cli.js <dir> roster            who is on shift and who they watch
 //   node conductor3/overseer/cli.js <dir> tick [--now ISO]  one review pass over the queue
+//   node conductor3/overseer/cli.js <dir> work [--now ISO]  workers answer returned questions, resubmit
 //   node conductor3/overseer/cli.js <dir> status            energy + counts per overseer
 //   node conductor3/overseer/cli.js <dir> report            the morning shift report (markdown)
 const O = require('./overseer');
@@ -22,6 +23,11 @@ if (cmd === 'roster') {
   const actions = O.tick(dir, { now });
   for (const a of actions) console.log(`${a.item}: ${a.overseer} -> ${a.verdict}${a.questions ? ' (' + a.questions.join(',') + ')' : ''}${a.ready === false ? ' [not decision-ready]' : ''}`);
   console.log(`${actions.length} review(s) this pass.`);
+} else if (cmd === 'work') {
+  const W = require('./worker');
+  const actions = W.workTick(dir, { now });
+  for (const a of actions) console.log(`${a.item}: answered ${a.answered}, stuck ${a.stuck}`);
+  console.log(`${actions.length} item(s) reworked this pass.`);
 } else if (cmd === 'status') {
   const s = O.loadState(dir);
   for (const p of ROSTER) { const ps = s.overseers[p.id]; if (ps) console.log(`${p.name}: energy ${(ps.energy * 100).toFixed(0)}%, reviewed ${ps.reviewed}, endorsed ${ps.endorsed}, returned ${ps.returned}, annotated ${ps.annotated}, deferred ${ps.deferred}`); }
