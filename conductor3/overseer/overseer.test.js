@@ -25,6 +25,7 @@ ok(O.check({ title: '', kind: 'draft', detail: GOOD }, strict).some((p) => p.rul
 ok(O.decisionReady({ kind: 'money', detail: 'Renewal is $99 for the year, charged to the card on file. We used it weekly this year and it underpins two lanes.' }, strict).length === 0, 'money item with amount is decision-ready');
 ok(O.decisionReady({ kind: 'money', detail: 'Renews tomorrow, seems useful, we talked about keeping it going for now.' }, strict).includes('no amount stated'), 'money item without amount is not ready');
 ok(O.decisionReady({ kind: 'send', detail: 'To: jane@example.com - thanks for the call, one careful paragraph follow-up with the two links she asked for.' }, strict).length === 0, 'send item with recipient is decision-ready');
+ok(O.decisionReady({ kind: 'commitment', detail: 'Accept the calendar invite for the intro call Wed Oct 21, 9:00-9:30am ET, Google Meet link included.' }, strict).length === 0, 'non-monetary commitment does not need an amount');
 ok(O.decisionReady({ kind: 'send', detail: 'A short reply to her about the thing we discussed last week sometime soon.' }, strict).includes('no recipient stated'), 'send item without recipient is not ready');
 
 // tick behavior
