@@ -65,7 +65,7 @@ function decisionReady(item, persona) {
   const detail = String(item.detail || '');
   const minLen = 20 + Math.round(persona.strictness * 60);
   if (detail.trim().length < minLen) missing.push('detail is too thin to decide from');
-  if ((item.kind === 'money' || item.kind === 'commitment') && !/\$\s?\d|\d+\s?(usd|dollars|euros)/i.test(detail)) missing.push('no amount stated');
+  if (item.kind === 'money' && !/\$\s?\d|\d+\s?(usd|dollars|euros)/i.test(detail)) missing.push('no amount stated'); // commitments are not all monetary
   if (item.kind === 'send' && !/\b(to|recipient)\s*:/i.test(detail)) missing.push('no recipient stated');
   return missing;
 }
