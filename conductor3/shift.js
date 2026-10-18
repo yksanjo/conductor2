@@ -11,11 +11,11 @@ const { tick } = require('./queue/tick');
 const O = require('./overseer/overseer'), W = require('./overseer/worker');
 
 function shift(dir, { now = new Date(), restHours = 0 } = {}) {
-  let n = 0; while (tick(dir, { now }).length && n++ < 200) {} // one item per tick; drain
+  let drained = 0; while (tick(dir, { now }).length && drained++ < 200) {} // one item per tick; drain
   const reviewed = O.tick(dir, { now });
   const reworked = W.workTick(dir, { now });
   const second = restHours > 0 ? O.tick(dir, { now: new Date(now.getTime() + restHours * 36e5) }) : [];
-  return { reviewed, reworked, second, report: O.report(dir) };
+  return { drained, reviewed, reworked, second, report: O.report(dir) };
 }
 
 module.exports = { shift };
@@ -28,5 +28,5 @@ if (require.main === module) {
   const r = shift(dir, { restHours });
   if (ri >= 0) { fs.writeFileSync(args[ri + 1], r.report); console.log('report written to ' + args[ri + 1]); }
   else process.stdout.write(r.report);
-  console.error(`drained ${n}, reviewed ${r.reviewed.length}, reworked ${r.reworked.length}, second-pass ${r.second.length}`);
+  console.error(`drained ${r.drained}, reviewed ${r.reviewed.length}, reworked ${r.reworked.length}, second-pass ${r.second.length}`);
 }
