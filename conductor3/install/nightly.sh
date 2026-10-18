@@ -13,5 +13,7 @@ a=(); v=(); for k in suppression exclusions watchlist; do if [ -f "$L/$k.csv" ];
 timeout "${MAX_RUN_MINUTES:-45}m" node "$R/leadx/cli.js" run --live --lane "$H/lane.json" --targets "$H/targets.txt" --contacts "$L/contacts.csv" --claims "$RUN/claims.csv" "${a[@]}" --out "$RUN" >> "$LOG" 2>&1; rc=$?
 # 3. mechanical verify, then write run.json so the morning inbox can see it
 if [ $rc -eq 0 ] && node "$R/leadx/cli.js" verify --out "$RUN" --contacts "$L/contacts.csv" --claims "$RUN/claims.csv" "${v[@]}" >> "$LOG" 2>&1; then st=verified; note="leadx output verified; leads await your review, nothing sent"; else st=failed; note="leadx or verify failed (exit $rc), see $LOG"; fi
-node -e 'const [d,s,n]=process.argv.slice(1);const id=require("path").basename(d);require("fs").writeFileSync(d+"/run.json",JSON.stringify({runId:id,mission:"leadx-nightly",state:s,history:[{state:s,note:n}]}))' "$RUN" "$st" "$note"
+node -e 'const [d,s,n]=process.argv.slice(1);const id=require("path").basename(d);require("fs").writeFileSync(d+"/run.json",JSON.stringify({runId:id,mission:"lead-extraction-nightly",state:s,history:[{state:s,note:n}]}))' "$RUN" "$st" "$note"
 node "$R/inbox.js" "$H/runs" > "$H/inbox.md"; echo "$st: $RUN" >> "$LOG"
+# 4. file the run into the overseer queue so the morning shift report includes it
+node "$R/autofile.js" "$H/queue" "$H/runs" >> "$LOG" 2>&1 || echo "autofile failed (non-fatal)" >> "$LOG"
