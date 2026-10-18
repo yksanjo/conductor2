@@ -56,4 +56,6 @@ Mission file format, run-state model, and a draft mission runner under `conducto
 
 ## conductor3 - iteration 4 (unreleased, auto-file deliverables)
 - `conductor3/autofile.js`: terminal mission runs (verified / needs-input / failed) are filed into the overseer queue automatically, with the deliverable attached as the worker's workpad artifact. Idempotent (runId-marked items), owner is `mission:<name>` so overseer assignment is stable per mission, in-progress runs are skipped. Wired into `install/nightly.sh` (non-fatal on failure). 10 tests.
-- Honest status: missions still are not launched by the runner (no Claude swarm call yet), so autofile only sees runs that exist. The leadx nightly writes its own run.json; mission-name mismatch ("leadx-nightly" vs missions/*.json) means deliverable lookup falls back to the newest .md in the run folder.
+- `conductor3/shift.js`: one command for the whole shift on a real queue (drain ticks -> overseers -> workers -> rested re-review -> report), with `--report out.md` and `--rest-hours N`. 7 tests.
+- Fixed: the leadx nightly now writes mission "lead-extraction-nightly" in run.json, matching missions/*.json, so autofile resolves the exact deliverable path.
+- Honest status: missions still are not launched by the runner (no Claude swarm call yet), so autofile only sees runs that exist; demo-shift.js uses a fake launcher.
