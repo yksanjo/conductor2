@@ -24,5 +24,9 @@ const out = path.join(d, 'report.md'); fs.writeFileSync(out, r.report);
 ok(fs.readFileSync(out, 'utf8') === r.report, 'report file writable');
 ok(shift(d, { now: new Date(T.getTime() + 9 * 36e5) }).reviewed.length === 0, 'second shift is a no-op on a settled queue');
 
+ok(byId(good.id).draft && byId(good.id).draft.type === 'briefing' && /nothing has been sent/i.test(byId(good.id).draft.body), 'shift composes real drafts before review');
+ok(byId(gated.id).draft === undefined, 'gated send item is never composed');
+ok(/## Drafts composed - review before any use, nothing sent/.test(r.report) && r.report.includes('**solid brief** [briefing]'), 'report lists composed drafts');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
