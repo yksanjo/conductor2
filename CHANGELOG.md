@@ -64,8 +64,9 @@ Mission file format, run-state model, and a draft mission runner under `conducto
 - `conductor3/compose.js`: deterministic draft composer. Drafted queue items get a real draft
   (recipient / subject / body) built only from the item's own detail and artifact text - no model,
   no spend, nothing sent. A recipient exists only when an email address is literally present in the
-  evidence (the published-address rule: a name alone never becomes a recipient, nothing is
-  pattern-guessed); otherwise the draft is a briefing note for Yoshi, marked as such. Idempotent
+  evidence - but extraction does NOT verify provenance, so every extracted recipient is marked
+  recipientVerified=false and the body carries an UNVERIFIED warning for a human to confirm;
+  otherwise the draft is a briefing note for Yoshi, marked as such. Idempotent
   via a content hash, and gated kinds (send / money / commitment) are never touched here. 12 tests.
 - `shift.js` runs the composer after the queue drain and before overseer review, and the morning
   report gains a "Drafts composed" section listing type and recipient. 3 more shift tests (10 total).
