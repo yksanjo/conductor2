@@ -23,12 +23,22 @@ t('briefing when no email in evidence, recipient null', () => {
   assert.match(it.draft.body, /no recipient identified/);
 });
 
-t('message when a published email is in the detail', () => {
+t('message when an email is in the detail, recipient marked UNVERIFIED', () => {
   const dir = tmp(); item(dir, { detail: 'Karl replied; his address is karl@example.com and the teaser is ready. next: send it.' });
   const it = Q.load(dir).items[0]; C.tick(dir);
   const d = Q.load(dir).items[0].draft;
   assert.strictEqual(d.type, 'message'); assert.strictEqual(d.recipient, 'karl@example.com');
+  assert.strictEqual(d.recipientVerified, false); // extraction never verifies provenance
   assert.match(d.body, /^Hi,/);
+  assert.match(d.body, /UNVERIFIED/);
+});
+
+t('no extracted recipient is ever marked verified', () => {
+  const dir = tmp(); item(dir, { detail: 'Reach karl@example.com or sam@example.org, both from an old thread.' });
+  C.tick(dir);
+  const d = Q.load(dir).items[0].draft;
+  assert.strictEqual(d.recipientVerified, false);
+  assert.match(d.body, /confirm it is the published, current address/);
 });
 
 t('never pattern-guesses a recipient from a name alone', () => {
