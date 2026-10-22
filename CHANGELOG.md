@@ -59,3 +59,15 @@ Mission file format, run-state model, and a draft mission runner under `conducto
 - `conductor3/shift.js`: one command for the whole shift on a real queue (drain ticks -> overseers -> workers -> rested re-review -> report), with `--report out.md` and `--rest-hours N`. 7 tests.
 - Fixed: the leadx nightly now writes mission "lead-extraction-nightly" in run.json, matching missions/*.json, so autofile resolves the exact deliverable path.
 - Honest status: missions still are not launched by the runner (no Claude swarm call yet), so autofile only sees runs that exist; demo-shift.js uses a fake launcher.
+
+## conductor3 - iteration 5 (unreleased, real drafts replace placeholders)
+- `conductor3/compose.js`: deterministic draft composer. Drafted queue items get a real draft
+  (recipient / subject / body) built only from the item's own detail and artifact text - no model,
+  no spend, nothing sent. A recipient exists only when an email address is literally present in the
+  evidence (the published-address rule: a name alone never becomes a recipient, nothing is
+  pattern-guessed); otherwise the draft is a briefing note for Yoshi, marked as such. Idempotent
+  via a content hash, and gated kinds (send / money / commitment) are never touched here. 12 tests.
+- `shift.js` runs the composer after the queue drain and before overseer review, and the morning
+  report gains a "Drafts composed" section listing type and recipient. 3 more shift tests (10 total).
+- Honest status: the composer assembles, it does not write prose - bodies quote the work record,
+  which keeps them factual but plain. A writing model would be spend and separate sign-off.
