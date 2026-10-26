@@ -63,4 +63,43 @@ function workTick(dir, { now = new Date() } = {}) {
   return actions;
 }
 
-module.exports = { workTick, artifactText };
+
+// Optional LLM rework (iteration 8). Runs AFTER the mechanical pass, only on items
+// still stuck. The model gets ONLY the item's own fields and workpad material and is
+// told to say when the answer is not there. Its answers are tagged [llm] so the human
+// can tell machine-drafted rework from evidence-based rework, and the item still goes
+// back through the deterministic overseer and, for gated kinds, the dashboard gate.
+// completeImpl injectable for tests; in production conductor3/llm.complete is used.
+const LLM_NA = 'not in the material';
+async function llmReworkPass(dir, { now = new Date(), llmCfg = null, completeImpl = null } = {}) {
+  const L = require('../llm');
+  const cfg = llmCfg || L.loadConfig(dir);
+  const call = completeImpl || L.complete;
+  if (!L.available(cfg)) return [];
+  const q = Q.load(dir);
+  const actions = [];
+  for (const item of q.items) {
+    if (!item.worker || !item.worker.stuck || !item.worker.stuck.length) continue;
+    if (!item.overseer || item.overseer.verdict !== 'reworked') continue;
+    const workpad = artifactText(dir, item);
+    const material = `Title: ${item.title}\nDetail: ${item.detail || ''}\nWorkpad:\n${workpad}`.slice(0, 6000);
+    const stillStuck = [];
+    for (const s of item.worker.stuck) {
+      const rule = s.split(':')[0];
+      const system = 'You answer questions about a work item using ONLY the material provided. Never invent facts, sources, names or figures. If the material does not contain the answer, reply with exactly: ' + LLM_NA;
+      const prompt = `Overseer question (${rule}): ${s}\n\nMaterial:\n${material}\n\nAnswer in at most 400 characters, or reply exactly: ${LLM_NA}`;
+      const out = await call(cfg, { system, prompt });
+      if (out && !out.includes(LLM_NA) && out.length <= 400) {
+        item.detail = String(item.detail || '').trim() + `\n[llm] ${out}`;
+        item.worker.answered.push(`${rule}: [llm] ${out}`);
+        actions.push({ item: item.id, rule, llm: true });
+      } else stillStuck.push(s);
+    }
+    item.worker.stuck = stillStuck;
+    item.worker.at = now.toISOString();
+    item.overseer = { by: item.overseer.by, verdict: 'reworked', returns: item.overseer.returns, note: stillStuck.length ? 'reworked, llm answered part; still stuck on the rest' : 'reworked with llm answers - review tagged lines', at: now.toISOString() };
+  }
+  if (actions.length) Q.save(dir, q);
+  return actions;
+}
+module.exports = { workTick, artifactText, llmReworkPass };
