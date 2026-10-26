@@ -13,10 +13,11 @@
 // gated until a dashboard click.
 //
 // Two honest output types:
-//   message  - an email address is literally present in the item's evidence, so
-//              the draft has recipient / subject / body (standing rule: published
-//              addresses only, never pattern-guessed, so a name alone is NOT a
-//              recipient)
+//   message  - an email address literally appears in the item's evidence, so the
+//              draft has recipient / subject / body. Extraction does NOT verify
+//              provenance: the address may be unpublished, guessed upstream, or
+//              stale. Every extracted recipient is marked recipientVerified=false
+//              and the body says so; a human confirms the address before any use.
 //   briefing - no address in evidence; a note for Yoshi himself, marked as such
 //
 // Idempotent: item.compose.sourceHash covers title + detail + artifact text;
@@ -43,6 +44,9 @@ function sourceHash(item, workpad) {
 }
 
 function findRecipient(evidence) {
+  // Extraction only. A match proves the string is in the evidence, nothing more:
+  // it does not establish the address was published, is current, or belongs to
+  // the intended person. Callers must treat the result as unverified.
   const m = evidence.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
   return m ? m[0] : null; // no address in evidence -> no recipient; never guess one
 }
@@ -62,6 +66,7 @@ function composeItem(dir, item, now = new Date()) {
   const lines = [];
   if (recipient) {
     lines.push(`Hi,`, '', String(item.detail || item.title).trim().split('\n')[0], '');
+    lines.push(`[Recipient address ${recipient} was extracted from the work record and is UNVERIFIED - confirm it is the published, current address for the intended person before any use. Extraction does not check provenance.]`, '');
   } else {
     lines.push(`Briefing for Yoshi - no recipient identified, nothing to send.`, '', String(item.detail || '').trim(), '');
   }
@@ -71,6 +76,7 @@ function composeItem(dir, item, now = new Date()) {
   return {
     type: recipient ? 'message' : 'briefing',
     recipient, // null for a briefing
+    recipientVerified: false, // extraction never verifies provenance; a human must
     subject,
     body: lines.join('\n'),
     composedAt: now.toISOString(),

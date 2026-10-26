@@ -59,3 +59,20 @@ Mission file format, run-state model, and a draft mission runner under `conducto
 - `conductor3/shift.js`: one command for the whole shift on a real queue (drain ticks -> overseers -> workers -> rested re-review -> report), with `--report out.md` and `--rest-hours N`. 7 tests.
 - Fixed: the leadx nightly now writes mission "lead-extraction-nightly" in run.json, matching missions/*.json, so autofile resolves the exact deliverable path.
 - Honest status: missions still are not launched by the runner (no Claude swarm call yet), so autofile only sees runs that exist; demo-shift.js uses a fake launcher.
+
+## conductor3 - iteration 5 (unreleased, real drafts replace placeholders)
+- `conductor3/compose.js`: deterministic draft composer. Drafted queue items get a real draft
+  (recipient / subject / body) built only from the item's own detail and artifact text - no model,
+  no spend, nothing sent. A recipient exists only when an email address is literally present in the
+  evidence - but extraction does NOT verify provenance, so every extracted recipient is marked
+  recipientVerified=false and the body carries an UNVERIFIED warning for a human to confirm;
+  otherwise the draft is a briefing note for Yoshi, marked as such. Idempotent
+  via a content hash, and gated kinds (send / money / commitment) are never touched here. 12 tests.
+- `shift.js` runs the composer after the queue drain and before overseer review, and the morning
+  report gains a "Drafts composed" section listing type and recipient. 3 more shift tests (10 total).
+- Honest status: the composer assembles, it does not write prose - bodies quote the work record,
+  which keeps them factual but plain. A writing model would be spend and separate sign-off.
+## conductor3 - iteration 8 (LOCAL ONLY until pushed to the PR branch)
+- `conductor3/llm.js`: optional LLM connection, off by default. Providers: `ollama` (local server at 127.0.0.1:11434, no key, free) and `openai-compatible` (billable - requires enabled config, the key in the C3_LLM_KEY env var, never in a file, and Yoshi's spend approval). Fail closed everywhere: missing/malformed config, disabled flag, missing key, unreachable server, timeout or empty output all return null; the deterministic path is untouched without a config. Config lives in `llm.json` in the queue dir, never in the repo.
+- `conductor3/overseer/worker.js` gains `llmReworkPass()`: after the mechanical pass, still-stuck questions are asked of the model using ONLY the item's own fields and workpad; the model is instructed to reply "not in the material" when the answer is absent (then nothing changes - no invention). LLM answers are tagged `[llm]` in the detail and the worker record, capped at 400 chars, and the item goes back through the deterministic overseer. `conductor3/llm-rework.js` CLI runs the pass.
+- Approvals still come only from dashboard clicks; nothing here sends, publishes or pays. 21 tests (`llm.test.js`).
