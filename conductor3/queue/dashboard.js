@@ -27,13 +27,26 @@ function page(s, token, now = new Date()) {
 body{font:15px -apple-system,system-ui,sans-serif;margin:24px;max-width:860px;color:#111}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:22px 0 8px}
 .bar{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}.c{border:1px solid #ddd;border-radius:8px;padding:8px 12px;min-width:90px}.c b{display:block;font-size:22px}
 .warn{background:#fff3cd;padding:8px 12px;border-radius:8px}.ok{background:#e7f6ea;padding:8px 12px;border-radius:8px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #eee;padding:6px 8px;text-align:left;vertical-align:top}
-.n{color:#666;font-size:12px}.warn-inline{color:#8a6d00}button{padding:5px 12px;border-radius:6px;border:1px solid #2a7;background:#2a7;color:#fff;cursor:pointer}button.no{background:#fff;color:#a22;border-color:#a22}</style>
+.n{color:#666;font-size:12px}.draftcard{border:1px solid #ddd;border-radius:8px;padding:10px 12px;margin:8px 0}.dbody{white-space:pre-wrap;font:13px/1.45 ui-monospace,monospace;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:8px 10px;margin:8px 0 2px}.dtag{color:#666;font-size:12px}.unv{color:#8a6d00;font-weight:600}.warn-inline{color:#8a6d00}button{padding:5px 12px;border-radius:6px;border:1px solid #2a7;background:#2a7;color:#fff;cursor:pointer}button.no{background:#fff;color:#a22;border-color:#a22}</style>
 <h1>Conductor3</h1><div class="${stale ? 'warn' : 'ok'}">Last tick: <b>${esc(ago(s.lastTick, now))}</b>${stale ? ' (stale: nothing is running the queue)' : ''} &middot; ${s.quiet ? 'Quiet hours: nothing is sent as you until 8am' : 'Daytime'} &middot; Nothing here sends anything</div>
 <div class=bar>${ORDER.filter((k) => s.counts[k]).map((k) => `<div class=c><b>${s.counts[k]}</b>${esc(k)}</div>`).join('') || '<div class=c>queue empty</div>'}</div>
 <h2>Waiting on you (${s.waiting.length})</h2>${s.waiting.length ? `<table><tr><th>Lane</th><th>Item</th><th>Kind</th><th></th></tr>${s.waiting.map((i) => row(i, true)).join('')}</table>` : '<p>Nothing waiting.</p>'}
+${draftsSection(s.items)}
 <h2>Everything else</h2><table><tr><th>Lane</th><th>Item</th><th>Kind</th><th>Status</th></tr>${s.items.filter((i) => i.status !== 'needs-approval').sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status)).map((i) => row(i, false)).join('')}</table>
 ${overseerSection(s.dir)}
 <script>const T=new URLSearchParams(location.search).get('t')||'';async function act(id,a){const r=await fetch('/api/'+a+'/'+id,{method:'POST',headers:{'x-token':T}});if(!r.ok){alert('Not allowed: open the dashboard with the URL printed at startup');return}location.reload()}</script>`;
+}
+function draftsSection(items) {
+  const ds = (items || []).filter((i) => i.draft && i.draft.type && i.draft.body);
+  if (!ds.length) return '';
+  const card = (i) => {
+    const d = i.draft;
+    const recip = d.recipient
+      ? `To: ${esc(d.recipient)} - ${d.recipientVerified ? 'verified' : '<span class=unv>UNVERIFIED</span>: confirm this is the published, current address for the intended person before any use.'}`
+      : 'Briefing for you - no recipient identified, nothing to send.';
+    return `<div class=draftcard><div><b>${esc(d.subject || i.title)}</b> <span class=dtag>[${esc(d.type)}] ${esc(i.lane)} / ${esc(i.id)}</span></div><div class=n>${recip}</div><pre class=dbody>${esc(d.body)}</pre></div>`;
+  };
+  return `<h2>Drafts to review (${ds.length}) - complete text below; nothing is sent from this page</h2>` + ds.map(card).join('');
 }
 function overseerSection(dir) {
   let st; try { st = JSON.parse(fs.readFileSync(path.join(dir, 'overseers.json'), 'utf8')); } catch { return ''; }
